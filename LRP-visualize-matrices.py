@@ -81,21 +81,60 @@ def update(_):
     ind = 0
     h0, h1, R1, C, R0 = all_h0[ind], all_h1[ind], all_R1[ind], all_C[ind], all_R0[ind]
     
-    visualize_mc_matrix_transform(W,   IN=h0, ax=ax1, patches=patchesW, annotate_with=("i", "j", "W", "$h_1$"))
-    visualize_mc_matrix_transform(C.T, IN=h1, ax=ax2, patches=patchesC, annotate_with=("j", "i", "C", "$h_0$"), c="r")
+    visualize_mc_matrix_transform(W,   IN=h0, ax=ax1, patches=patches_W, annotate_with=("i", "j", "W", "$h_1$"))
+    visualize_mc_matrix_transform(C.T, IN=h1, ax=ax2, patches=patches_C, annotate_with=("j", "i", "C", "$h_0$"), c="r")
     
     # print(f"h1: {h1}, \nh0: {h0}\n\n")
-    print(f"W:\n {W}, \n\nC.T:\n {C.T}\n\n distance of basis vectors of C.T:\n {np.sqrt(np.sum((C.T[:, 0] - C.T[:, 1])**2))}\n")
+    # print(f"W:\n {W}, \n\nC.T:\n {C.T}\n\n distance of basis vectors of C.T:\n {np.sqrt(np.sum((C.T[:, 0] - C.T[:, 1])**2))}\n")
     
     # plot LRP result
-    if 'lrp_result' in patchesC: patchesC['lrp_result'].remove()
-    patchesC['lrp_result'] = ax.add_patch(Circle(R0, radius=.03, color='orange'))
+    if 'lrp_result' in patches_C: patches_C['lrp_result'].remove()
+    patches_C['lrp_result'] = ax.add_patch(Circle(R0, radius=.03, color='orange'))
+    
+    plot_explicit_biases = True
+    ### explicit biases ###
+    if plot_explicit_biases:
+        W_eb = np.block([[(W - W.min(axis=1, keepdims=True)), np.eye(2)], 
+                         [np.zeros((2,4))]])
+        W_eb /= W_eb.sum(axis=0, keepdims=True)
+        # print("W_eb \n", W_eb, '\n')
+
+        biases = W.min(axis=1)
+        biases_mass = biases.sum()
+        assert(biases_mass <= 1)
+
+        h0_eb = np.hstack((h0 * (1 - biases_mass), biases))
+        print("h0_eb", h0_eb, '\n')
+
+        h1_eb = W_eb @ h0_eb
+        print("h1_eb", h1_eb, "\nh1", h1, '\n')
+
+        C_eb = W_eb * h0_eb[None, :]
+        C_eb /= C_eb.sum(axis=1, keepdims=True)
+        C_eb[np.isnan(C_eb)] = 0
+        print("C_eb.T \n", C_eb.T, "\n C.T \n", C.T, '\n')
+
+        print((C.T - C_eb.T[:2, :2]) / h0[:, None])
+        print("\n\n")
+
+        R1_eb = h1_eb * (h1_eb == h1_eb.max())
+        # print("R1_eb", R1_eb, '\n')
+
+        R0_eb = C_eb.T @ R1_eb
+        print("R0_eb", R0_eb, '\n')
+
+        visualize_mc_matrix_transform(C_eb.T[:2, :2], IN=h1_eb[:2], ax=ax2, patches=patches_C_eb, annotate_with=None, c="green")
+    
+        # plot LRP result
+        if 'lrp_result' in patches_C_eb: patches_C_eb['lrp_result'].remove()
+        patches_C_eb['lrp_result'] = ax.add_patch(Circle(R0_eb[:2], radius=.03, color='orange'))
     
     fig.canvas.draw_idle()
 
 
-patchesW = {}
-patchesC = {}
+patches_W = {}
+patches_C = {}
+patches_C_eb = {}
 
 fig, (ax1,ax2) = plt.subplots(1, 2, figsize=(13, 6))
 
