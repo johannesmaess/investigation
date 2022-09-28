@@ -1,6 +1,55 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
+def global_conv_matrix(conv, bias=None, img_shape=None, zero_padding=(0,0)):
+    assert(img_shape and len(img_shape) == len(zero_padding))
+    img_shape = np.array(img_shape)
+    zero_padding = np.array(zero_padding)
+    if bias: print("Warning: So far we currently do nothing with passed bias terms.")
+
+    # this is the matrix that will represent the global convolution operation
+    img_shape_padded = img_shape + 2*zero_padding
+    img_flattened_length = np.prod(img_shape_padded)
+
+    res_shape = img_shape_padded - conv.shape + 1
+    res_flattened_length = np.prod(res_shape)
+    
+    # this is gonna be the global convolution matrix
+    trans = np.zeros((res_flattened_length, img_flattened_length))
+
+    # application positions of conv: this relates to the index where the top left corner of the conv sits in the padded input, at the application of the filter.
+    img_positions = np.mgrid[0:res_shape[0], 0:res_shape[1]]
+    img_positions = np.transpose(img_positions, (1,2,0)).reshape((-1,2))
+
+    # distinct position in conv filter
+    conv_positions = np.mgrid[0:conv.shape[0], 0:conv.shape[1]]
+    conv_positions = np.transpose(conv_positions, (1,2,0)).reshape((-1,2))
+
+    # Write convolutional weights in many places of the global transition matrix
+    for i, conv_pos in enumerate(conv_positions):
+        # which weight of the conv to write?
+        val = conv[conv_pos[0], conv_pos[1]]
+        
+        # calc all 576 places to write to
+        x_indices = np.arange(res_flattened_length)
+        y_indices = np.ravel_multi_index((img_positions + conv_pos).T, img_shape_padded)
+        
+        # write
+        trans[x_indices, y_indices] = val
+
+    # delete columns of trans matrix that are associated with padding. make trans square again.
+    mask = np.ones(img_flattened_length)
+    ara = np.arange(img_flattened_length)
+    # exclude all those img_positions that lie in the padded rows (the first two, and the last two).
+    mask[ara < img_shape_padded[1] * zero_padding[0]] = False
+    mask[ara >= len(mask) - img_shape_padded[1] * zero_padding[0]] = False 
+    # exclude all those that are applied in the first rows, and last rows, that are just zero padding
+    mask[np.mod(ara,                   img_shape_padded[1]) < zero_padding[1]] = False
+    mask[np.mod(ara + zero_padding[1], img_shape_padded[1]) < zero_padding[1]] = False
+
+    trans = trans[:, mask != 0]
+    return trans
+
 
 # calculate surrogate model
 def forw_surrogate_matrix(W, curr, gamma):
