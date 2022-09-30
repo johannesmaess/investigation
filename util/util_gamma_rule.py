@@ -1,7 +1,9 @@
 import numpy as np
+import torch
 import matplotlib.pyplot as plt
 
-def global_conv_matrix(conv, bias=None, img_shape=None, zero_padding=(0,0)):
+def global_conv_matrix(conv, bias=None, img_shape=None, zero_padding=(0,0),
+                        sparse_matrix=False):
     assert(img_shape and len(img_shape) == len(zero_padding))
     img_shape = np.array(img_shape)
     zero_padding = np.array(zero_padding)
@@ -15,7 +17,10 @@ def global_conv_matrix(conv, bias=None, img_shape=None, zero_padding=(0,0)):
     res_flattened_length = np.prod(res_shape)
     
     # this is gonna be the global convolution matrix
-    trans = np.zeros((res_flattened_length, img_flattened_length))
+    if not sparse_matrix:
+        trans = np.zeros((res_flattened_length, img_flattened_length))
+    else:
+        trans = torch.sparse.Tensor(size=(res_flattened_length, img_flattened_length))
 
     # application positions of conv: this relates to the index where the top left corner of the conv sits in the padded input, at the application of the filter.
     img_positions = np.mgrid[0:res_shape[0], 0:res_shape[1]]
