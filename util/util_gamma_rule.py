@@ -2,8 +2,12 @@ import numpy as np
 import torch
 import matplotlib.pyplot as plt
 
+from scipy.sparse import coo_array
+from scipy.sparse.linalg import eigs
+
+# TODO: maybe I should change this function to handle soarse matrices in Scipy, as it has more features than Sparse Pytorch.
 def global_conv_matrix(conv, bias=None, img_shape=None, zero_padding=(0,0),
-                        sparse_matrix=False):
+                        sparse_matrix=True):
     assert(img_shape and len(img_shape) == len(zero_padding))
     img_shape = np.array(img_shape)
     zero_padding = np.array(zero_padding)
@@ -11,16 +15,16 @@ def global_conv_matrix(conv, bias=None, img_shape=None, zero_padding=(0,0),
 
     # this is the matrix that will represent the global convolution operation
     img_shape_padded = img_shape + 2*zero_padding
-    img_flattened_length = np.prod(img_shape_padded)
+    img_padded_flattened_length = np.prod(img_shape_padded)
+
+    img_flattened_length = np.prod(img_shape)
 
     res_shape = img_shape_padded - conv.shape + 1
     res_flattened_length = np.prod(res_shape)
     
     # this is gonna be the global convolution matrix
     if not sparse_matrix:
-        trans = np.zeros((res_flattened_length, img_flattened_length))
-    else:
-        trans = torch.sparse.Tensor(size=(res_flattened_length, img_flattened_length))
+        trans = np.zeros((res_flattened_length, img_padded_flattened_length))
 
     # application positions of conv: this relates to the index where the top left corner of the conv sits in the padded input, at the application of the filter.
     img_positions = np.mgrid[0:res_shape[0], 0:res_shape[1]]
@@ -29,6 +33,11 @@ def global_conv_matrix(conv, bias=None, img_shape=None, zero_padding=(0,0),
     # distinct position in conv filter
     conv_positions = np.mgrid[0:conv.shape[0], 0:conv.shape[1]]
     conv_positions = np.transpose(conv_positions, (1,2,0)).reshape((-1,2))
+
+    if sparse_matrix:
+        x_indices_list = []
+        y_indices_list = []
+        vals_list = []
 
     # Write convolutional weights in many places of the global transition matrix
     for i, conv_pos in enumerate(conv_positions):
@@ -39,53 +48,146 @@ def global_conv_matrix(conv, bias=None, img_shape=None, zero_padding=(0,0),
         x_indices = np.arange(res_flattened_length)
         y_indices = np.ravel_multi_index((img_positions + conv_pos).T, img_shape_padded)
         
-        # write
-        trans[x_indices, y_indices] = val
+        if sparse_matrix:
+            x_indices_list.append(x_indices)
+            y_indices_list.append(y_indices)
+            vals_list.append(np.full(res_flattened_length, val))
+        else:
+            # write
+            trans[x_indices, y_indices] = val
 
     # delete columns of trans matrix that are associated with padding. make trans square again.
-    mask = np.ones(img_flattened_length)
-    ara = np.arange(img_flattened_length)
+    column_mask = np.ones(img_padded_flattened_length, dtype=bool)
+    ara = np.arange(img_padded_flattened_length)
     # exclude all those img_positions that lie in the padded rows (the first two, and the last two).
-    mask[ara < img_shape_padded[1] * zero_padding[0]] = False
-    mask[ara >= len(mask) - img_shape_padded[1] * zero_padding[0]] = False 
+    column_mask[ara < img_shape_padded[1] * zero_padding[0]] = False
+    column_mask[ara >= len(column_mask) - img_shape_padded[1] * zero_padding[0]] = False 
     # exclude all those that are applied in the first rows, and last rows, that are just zero padding
-    mask[np.mod(ara,                   img_shape_padded[1]) < zero_padding[1]] = False
-    mask[np.mod(ara + zero_padding[1], img_shape_padded[1]) < zero_padding[1]] = False
+    column_mask[np.mod(ara,                   img_shape_padded[1]) < zero_padding[1]] = False
+    column_mask[np.mod(ara + zero_padding[1], img_shape_padded[1]) < zero_padding[1]] = False
 
-    trans = trans[:, mask != 0]
+    assert img_flattened_length == column_mask.sum(), "Number of columns that are to be preserved is unequal to the input length."
+
+    if not sparse_matrix:
+        ### filter ###
+        trans = trans[:, column_mask]
+    else:
+        x_indices = np.array(x_indices_list).flatten()
+        y_indices = np.array(y_indices_list).flatten()
+        values = np.array(vals_list).flatten()
+
+        ### filter ###
+        indices_mask = column_mask[y_indices] # a lookup in a binary array -> binary array
+
+        # drop those indices & values that are in columns that we want to delete.
+        y_indices = y_indices[indices_mask]   # applying a binary array to an integer array -> integer array
+        x_indices = x_indices[indices_mask]   
+        values = values[indices_mask]
+
+        # reduce those y_indices that are AFTER columns that we want to delete.
+        y_indices_translation = column_mask.cumsum() - 1
+        y_indices = y_indices_translation[y_indices]
+
+        indices = np.vstack([x_indices, y_indices])
+        trans = torch.sparse_coo_tensor(indices = indices,
+                                        values = values,
+                                        size=(res_flattened_length, img_flattened_length))
+
     return trans
 
 
 # calculate surrogate model
-def forw_surrogate_matrix(W, curr, gamma):
+def forw_surrogate_matrix(W, curr, gamma, checks=True, automatic_sparse_call=False):
+
+    if automatic_sparse_call==True and W.is_sparse:
+        return forw_surrogate_matrix_sparse(W, curr, gamma, checks)
+
     # activation of following layer
     foll = W @ curr
     
     # create unnormalized gamma forward matrix
     R_i_to_j = W + gamma * np.clip(W, 0, None)
     
-    assert R_i_to_j.shape == W.shape
-    assert (R_i_to_j @ curr).shape == (W.shape[0],)
+    if checks:
+        assert R_i_to_j.shape == W.shape
+        assert (R_i_to_j @ curr).shape == (W.shape[0],)
           
     # normalize it
-    forwards_ratio = foll / (R_i_to_j @ curr)
-    forwards_ratio[np.logical_and(foll == 0, (R_i_to_j @ curr) == 0)] = 1 # rule: 0/0 = 1 (this is an edge case that does not matter much)
+    res_unnormalized = R_i_to_j @ curr
+    forwards_ratio = foll / res_unnormalized
+    forwards_ratio[np.logical_and(foll == 0, res_unnormalized == 0)] = 1 # rule: 0/0 = 1 (this is an edge case that does not matter much)
 
 
     R_i_to_j *= forwards_ratio[:, None]
-    
-    assert R_i_to_j.shape == W.shape
 
-    # check local equality of modified and original transtition matrix
-    assert np.allclose(R_i_to_j @ curr,  W @ curr), f"Too high difference in outputs: {(R_i_to_j @ curr) - (W @ curr)}"
-
-    # print(np.percentile(np.absolute(R_i_to_j), (0,1,99,100)))
+    if checks:
+        # check local equality of modified and original transtition matrix
+        assert np.allclose(R_i_to_j @ curr,  W @ curr, atol=0.0001), f"Too high difference in outputs. Maximum point-wise diff: {(R_i_to_j @ curr) - (W @ curr).abs().max()}"
     
+    return R_i_to_j
+
+# calculate surrogate model
+def forw_surrogate_matrix_sparse(W, curr, gamma, checks=True):
+
+    # activation of following layer
+    foll = W @ curr
+    
+    # create unnormalized gamma forward matrix
+    clipped = torch.sparse_coo_tensor(indices = W.coalesce().indices(),
+                                        values = W.coalesce().values().clip(0,None),
+                                        size = W.shape)
+    R_i_to_j = W + gamma * clipped
+    
+    if checks:
+        assert R_i_to_j.shape == W.shape
+        assert (R_i_to_j @ curr).shape == (W.shape[0],)
+
+          
+    # normalize it
+    res_unnormalized = R_i_to_j @ curr
+    forwards_ratio = foll / res_unnormalized
+    forwards_ratio[torch.logical_and(foll == 0, res_unnormalized == 0)] = 1 # rule: 0/0 = 1 (this is an edge case that does not matter much)
+
+    indices = R_i_to_j.coalesce().indices()
+    x_indices = indices[0]
+    forwards_ratio_per_value = forwards_ratio[x_indices]
+
+    R_i_to_j = torch.sparse_coo_tensor(indices = indices,
+                            values = R_i_to_j.coalesce().values() * forwards_ratio_per_value,
+                            size = R_i_to_j.shape)
+
+    if checks:
+        # check local equality of modified and original transtition matrix
+        assert np.allclose(R_i_to_j @ curr,  W @ curr, atol=0.002), f"Too high difference in outputs. Maximum point-wise diff: {((R_i_to_j @ curr) - (W @ curr)).abs().max()}"
+
+    if checks == 2: # level for major checks
+        print("Running checks of lvl 2. Dense matrix computation can take a while...")
+
+        R_i_to_j_dense = forw_surrogate_matrix(W.to_dense(), curr, gamma, checks=True)
+        diff = (R_i_to_j_dense - R_i_to_j)
+
+        print("Warning: We allow a high point-wise error of 0.2 in the forward matrix.") # We hope that this gets cancelled out well though, as the error is high absolute, but very low in relative terms.
+        assert np.allclose(diff, 0, atol=0.2), f"Too high difference in forward matrices. Maximum point-wise diff: {(R_i_to_j_dense - R_i_to_j).abs().max()}"
+
+        print("The five largest error are:")
+        for i in range(5):
+            ind = (np.unravel_index(diff.abs().argmax(), shape=R_i_to_j_dense.shape))
+            print(ind, diff[ind], R_i_to_j_dense[ind], R_i_to_j[ind])
+            diff[ind] = 0
+
     return R_i_to_j
 
 def run_and_plot(weights_list, points_list, gammas,
                 num_evals=None, mark_positive_slope=True, percentile_to_plot=None, ylim=4,
                 one_plot_per_point=False):
+    
+    sparse = np.all([W.is_sparse for W in weights_list])
+    if sparse:
+        print("Running with sparse matrices...")
+        assert num_evals, "Running with sparse matrices, num_evals must be specified."
+    else:
+        assert np.all([not W.is_sparse for W in weights_list]), "A combination of sparse & dense Weight matrices is not supported."
+
     # helper functions
     def plt_init():
         plt.figure(figsize=(20,10))
@@ -104,34 +206,52 @@ def run_and_plot(weights_list, points_list, gammas,
 
         for j, point in enumerate(points_list):
             if one_plot_per_point: plt_init()
+            if not sparse:
 
-            forwards = [forw_surrogate_matrix(W, point, gamma) for gamma in gammas]
-            # backwards = [back_surrogate_matrix(W, point, gamma) for gamma in gammas]
+                forwards = [forw_surrogate_matrix(W, point, gamma) for gamma in gammas]
+                # backwards = [back_surrogate_matrix(W, point, gamma) for gamma in gammas]
 
-            evals, evecs = list(zip(*[np.linalg.eig(forward) for forward in forwards]))
-            del evecs
+                evals, evecs = list(zip(*[np.linalg.eig(forward) for forward in forwards]))
+                del evecs
 
-            evals = np.array(evals)
-            # evecs = np.array(evecs)
+                evals = np.array(evals)
+                # evecs = np.array(evecs)
 
-            # remove evals and evecs where eval is 0:
-            is_non_zero = evals[0] != 0
-            evals = evals[:, is_non_zero]
-            # evecs = evecs[:, is_non_zero, :]
+                # remove evals and evecs where eval is 0:
+                is_non_zero = evals[0] != 0
+                evals = evals[:, is_non_zero]
+                # evecs = evecs[:, is_non_zero, :]
 
-            # sort by ascending abs(eigenvalues)
-            evals = np.abs(evals)
-            order = np.argsort(-evals, axis=1)
+                # sort by ascending abs(eigenvalues)
+                evals = np.abs(evals)
+                order = np.argsort(-evals, axis=1)
 
-            if num_evals and num_evals < evals.shape[1]:
-                order = order[:, :num_evals]
+                if num_evals and num_evals < evals.shape[1]:
+                    order = order[:, :num_evals]
 
-            print(f"Matrix {i+1}, Point {j+1}: {is_non_zero.sum()} of {evals.shape[1]} Eigenvalues are non-zero. {order.shape[1]} get plotted.")
+                print(f"Matrix {i+1}, Point {j+1}: {is_non_zero.sum()} of {evals.shape[1]} Eigenvalues are non-zero. {order.shape[1]} get plotted.")
 
-            x_index = np.ones(order.shape[1]) * np.arange(order.shape[0])[:, None]
-            x_index = x_index.astype(int)
-            evals = evals[x_index, order]
-            # evecs = evecs[x_index, order] todo
+                x_index = np.ones(order.shape[1]) * np.arange(order.shape[0])[:, None]
+                x_index = x_index.astype(int)
+                evals = evals[x_index, order]
+                # evecs = evecs[x_index, order] todo
+
+            else: # is sparse
+                # compute sparse matrices in Pytorch COO format
+                forwards = [forw_surrogate_matrix_sparse(W, point, gamma) for gamma in gammas]
+                # change from Pytorch COO sparse to scipy COO sparse
+                forwards = [coo_array((forw.coalesce().values(), forw.coalesce().indices()), forw.shape) for forw in forwards]
+
+                evals, evecs = list(zip(*[eigs(forward) for forward in forwards]))
+
+                evals = np.array(evals)
+                del evecs
+
+                # print(evals.shape, evals)
+
+                evals = np.abs(evals)
+
+                # print(evals.shape, evals)
 
             if percentile_to_plot:
                 y_lim = np.percentile(evals, percentile_to_plot)
