@@ -97,10 +97,7 @@ def global_conv_matrix(conv, bias=None, img_shape=None, zero_padding=(0,0),
 
 
 # calculate surrogate model
-def forw_surrogate_matrix(W, curr, gamma, checks=True, automatic_sparse_call=False):
-
-    if automatic_sparse_call==True and W.is_sparse:
-        return forw_surrogate_matrix_sparse(W, curr, gamma, checks)
+def forw_surrogate_matrix(W, curr, gamma, checks=True):
 
     # activation of following layer
     foll = W @ curr
@@ -127,7 +124,7 @@ def forw_surrogate_matrix(W, curr, gamma, checks=True, automatic_sparse_call=Fal
     return R_i_to_j
 
 # calculate surrogate model
-def forw_surrogate_matrix_sparse(W, curr, gamma, checks=True):
+def forw_surrogate_matrix_sparse(W, curr, gamma, checks='Warn only'):
 
     # activation of following layer
     foll = W @ curr
@@ -156,9 +153,14 @@ def forw_surrogate_matrix_sparse(W, curr, gamma, checks=True):
                             values = R_i_to_j.coalesce().values() * forwards_ratio_per_value,
                             size = R_i_to_j.shape)
 
-    if checks:
+    if "warn" in checks.lower():
         # check local equality of modified and original transtition matrix
-        assert np.allclose(R_i_to_j @ curr,  W @ curr, atol=0.002), f"Too high difference in outputs. Maximum point-wise diff: {((R_i_to_j @ curr) - (W @ curr)).abs().max()}"
+        if not np.allclose(R_i_to_j @ curr,  W @ curr, atol=0.002):
+            print(f"Warning: High difference in outputs (gamma = {gamma}). Maximum point-wise diff: {((R_i_to_j @ curr) - (W @ curr)).abs().max()}")
+
+    elif checks:
+        # check local equality of modified and original transtition matrix
+        assert np.allclose(R_i_to_j @ curr,  W @ curr, atol=0.002), f"Too high difference in outputs (gamma = {gamma}). Maximum point-wise diff: {((R_i_to_j @ curr) - (W @ curr)).abs().max()}"
 
     if checks == 2: # level for major checks
         print("Running checks of lvl 2. Dense matrix computation can take a while...")
@@ -167,7 +169,7 @@ def forw_surrogate_matrix_sparse(W, curr, gamma, checks=True):
         diff = (R_i_to_j_dense - R_i_to_j)
 
         print("Warning: We allow a high point-wise error of 0.2 in the forward matrix.") # We hope that this gets cancelled out well though, as the error is high absolute, but very low in relative terms.
-        assert np.allclose(diff, 0, atol=0.2), f"Too high difference in forward matrices. Maximum point-wise diff: {(R_i_to_j_dense - R_i_to_j).abs().max()}"
+        assert np.allclose(diff, 0, atol=0.2), f"Too high difference in forward matrices (gamma = {gamma}). Maximum point-wise diff: {(R_i_to_j_dense - R_i_to_j).abs().max()}"
 
         print("The five largest error are:")
         for i in range(5):
@@ -177,18 +179,72 @@ def forw_surrogate_matrix_sparse(W, curr, gamma, checks=True):
 
     return R_i_to_j
 
-def run_and_plot(weights_list, points_list, gammas,
-                num_evals=None, mark_positive_slope=True, percentile_to_plot=None, ylim=4,
-                one_plot_per_point=False):
-    
-    sparse = np.all([W.is_sparse for W in weights_list])
-    if sparse:
-        print("Running with sparse matrices...")
-        assert num_evals, "Running with sparse matrices, num_evals must be specified."
-    else:
-        assert np.all([not W.is_sparse for W in weights_list]), "A combination of sparse & dense Weight matrices is not supported."
+def calc_evals(W, point, gammas, num_evals=None):
+    forwards = [forw_surrogate_matrix(W, point, gamma) for gamma in gammas]
+    # backwards = [back_surrogate_matrix(W, point, gamma) for gamma in gammas]
 
-    # helper functions
+    evals, evecs = list(zip(*[np.linalg.eig(forward) for forward in forwards]))
+    del evecs
+
+    evals = np.array(evals)
+    # evecs = np.array(evecs)
+
+    # remove evals and evecs where eval is 0:
+    is_non_zero = evals[0] != 0
+    evals = evals[:, is_non_zero]
+    # evecs = evecs[:, is_non_zero, :]
+
+    # sort by ascending abs(eigenvalues)
+    evals = np.abs(evals)
+    order = np.argsort(-evals, axis=1)
+
+    if num_evals and num_evals < evals.shape[1]:
+        order = order[:, :num_evals]
+
+    # print(f"Matrix {i+1}, Point {j+1}: {is_non_zero.sum()} of {evals.shape[1]} Eigenvalues are non-zero. {order.shape[1]} get plotted.")
+
+    x_index = np.ones(order.shape[1]) * np.arange(order.shape[0])[:, None]
+    x_index = x_index.astype(int)
+    evals = evals[x_index, order]
+    # evecs = evecs[x_index, order] todo
+
+    return evals
+
+def calc_evals_sparse(W, point, gammas, num_evals):
+    # compute sparse matrices in Pytorch COO format
+    forwards = [forw_surrogate_matrix_sparse(W, point, gamma) for gamma in gammas]
+    # change from Pytorch COO sparse to scipy COO sparse
+    forwards = [coo_array((forw.coalesce().values(), forw.coalesce().indices()), forw.shape) for forw in forwards]
+
+    evals, evecs = list(zip(*[eigs(forward, k=num_evals) for forward in forwards]))
+
+    evals = np.array(evals)
+    del evecs
+    evals = np.abs(evals) # NOTE: we only use analyse abs(EV) so far
+
+    return evals
+
+def calc_evals_batch(weights_list, points_list, gammas, num_evals=None):
+    ### preemptive checks ###
+    if np.any([type(W) is torch.Tensor and W.is_sparse for W in weights_list]):
+        print("Running with at least one sparse matrix...")
+        assert num_evals, "Running with sparse matrices, num_evals must be specified."
+
+    computed_evals = [[None] * len(points_list)] * len(weights_list)
+
+    for i, W in enumerate(weights_list):
+        for j, point in enumerate(points_list):
+            if type(W) is torch.Tensor and W.is_sparse:
+                computed_evals[i][j] = calc_evals_sparse(W, point, gammas, num_evals)
+            else:
+                computed_evals[i][j] = calc_evals(W, point, gammas, num_evals)
+
+    return computed_evals
+
+
+def plot_evals_lineplot(precomputed_evals, gammas, num_evals=None, 
+                mark_positive_slope=True, percentile_to_plot=None, ylim=4, one_plot_per_point=False):
+    ### helper functions ###
     def plt_init():
         plt.figure(figsize=(20,10))
         plt.title('Evolution of abs(complex eigenvalues) with increasing $\gamma$' +
@@ -200,72 +256,29 @@ def run_and_plot(weights_list, points_list, gammas,
     def plt_show():
         plt.legend(loc='upper right')
         plt.show()
-        
-    for i, W in enumerate(weights_list):
+
+    ### preemptive checks ###
+    assert np.all([[len(line) == len(gammas) for line in sub_list] for sub_list in precomputed_evals]), "Shape doesn't match."
+
+    for i, data_for_one_matrix_for_all_points in enumerate(precomputed_evals): # iterate matrices
         if not one_plot_per_point: plt_init()
 
-        for j, point in enumerate(points_list):
+        for j, evals in enumerate(data_for_one_matrix_for_all_points): # iterate points
             if one_plot_per_point: plt_init()
-            if not sparse:
-
-                forwards = [forw_surrogate_matrix(W, point, gamma) for gamma in gammas]
-                # backwards = [back_surrogate_matrix(W, point, gamma) for gamma in gammas]
-
-                evals, evecs = list(zip(*[np.linalg.eig(forward) for forward in forwards]))
-                del evecs
-
-                evals = np.array(evals)
-                # evecs = np.array(evecs)
-
-                # remove evals and evecs where eval is 0:
-                is_non_zero = evals[0] != 0
-                evals = evals[:, is_non_zero]
-                # evecs = evecs[:, is_non_zero, :]
-
-                # sort by ascending abs(eigenvalues)
-                evals = np.abs(evals)
-                order = np.argsort(-evals, axis=1)
-
-                if num_evals and num_evals < evals.shape[1]:
-                    order = order[:, :num_evals]
-
-                print(f"Matrix {i+1}, Point {j+1}: {is_non_zero.sum()} of {evals.shape[1]} Eigenvalues are non-zero. {order.shape[1]} get plotted.")
-
-                x_index = np.ones(order.shape[1]) * np.arange(order.shape[0])[:, None]
-                x_index = x_index.astype(int)
-                evals = evals[x_index, order]
-                # evecs = evecs[x_index, order] todo
-
-            else: # is sparse
-                # compute sparse matrices in Pytorch COO format
-                forwards = [forw_surrogate_matrix_sparse(W, point, gamma) for gamma in gammas]
-                # change from Pytorch COO sparse to scipy COO sparse
-                forwards = [coo_array((forw.coalesce().values(), forw.coalesce().indices()), forw.shape) for forw in forwards]
-
-                evals, evecs = list(zip(*[eigs(forward) for forward in forwards]))
-
-                evals = np.array(evals)
-                del evecs
-
-                # print(evals.shape, evals)
-
-                evals = np.abs(evals)
-
-                # print(evals.shape, evals)
-
             if percentile_to_plot:
-                y_lim = np.percentile(evals, percentile_to_plot)
+                y_lim = np.percentile(evals, percentile_to_plot) + .2
                 plt.ylim((-1, y_lim))
 
             # reset color cycle
             plt.gca().set_prop_cycle(None)
-            # plot for this gamma
-            plt.plot(gammas, evals + np.random.normal(0, .005, size=evals.shape[1])[None, :], label=[f'Exp. {i+1}, Point {j+1}, EV {k+1}' for k in range(evals.shape[1])])
+            # plot for this point
+            Y = evals + np.random.normal(0, .005, size=evals.shape[1])[None, :] # add some random noise, such that lines don't overlap.
+            labels = [f'Exp. {i+1}, Point {j+1}, EV {k+1}' for k in range(evals.shape[1])]
+            plt.plot(gammas, Y, label=labels)
 
             if mark_positive_slope: # plot a scatter dot if the series values is increasing
                 # calc sign of derivative
                 is_positive = np.diff(evals, axis=0) > 0
-
                 # reset color cycle
                 plt.gca().set_prop_cycle(None)
 
@@ -273,7 +286,6 @@ def run_and_plot(weights_list, points_list, gammas,
                     x = gammas[:-1][is_pos]
                     y = np.full_like(x, -.2 -.05*k - .15*j)
                     plt.scatter(x,y, s=5)
-
 
             if one_plot_per_point: plt_show()
         if not one_plot_per_point: plt_show()
