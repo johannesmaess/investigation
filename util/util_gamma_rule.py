@@ -220,7 +220,7 @@ def calc_evals_sparse(W, point, gammas, num_evals):
 
     evals = np.array(evals)
     del evecs
-    evals = np.abs(evals) # NOTE: we only use analyse abs(EV) so far
+    evals = np.abs(evals) # NOTE: we only analyse abs(EV) so far
 
     return evals
 
@@ -229,21 +229,28 @@ def calc_evals_batch(weights_list, points_list, gammas, num_evals=None):
     if np.any([type(W) is torch.Tensor and W.is_sparse for W in weights_list]):
         print("Running with at least one sparse matrix...")
         assert num_evals, "Running with sparse matrices, num_evals must be specified."
-
-    computed_evals = [[None] * len(points_list)] * len(weights_list)
+    if not num_evals:
+        num_evals = min([min(W.shape) for W in weights_list])
+    print(num_evals)
+    
+    computed_evals = np.zeros((len(weights_list), len(points_list), len(gammas), num_evals))
 
     for i, W in enumerate(weights_list):
         for j, point in enumerate(points_list):
+            print(i,j)
             if type(W) is torch.Tensor and W.is_sparse:
                 computed_evals[i][j] = calc_evals_sparse(W, point, gammas, num_evals)
             else:
-                computed_evals[i][j] = calc_evals(W, point, gammas, num_evals)
+                computed_evals[i][j] = calc_evals(W, point, gammas, num_evals) # warning: assignment might fail if func returns less than num_evals
 
     return computed_evals
 
 
 def plot_evals_lineplot(precomputed_evals, gammas, num_evals=None, 
-                mark_positive_slope=True, percentile_to_plot=None, ylim=4, one_plot_per_point=False):
+                mark_positive_slope=True, percentile_to_plot=None, ylim=4, one_plot_per_point=False,
+                yscale='linear'):
+    ylim_lower = {'linear':0, 'log': .1}[yscale]
+
     ### helper functions ###
     def plt_init():
         plt.figure(figsize=(20,10))
@@ -251,9 +258,10 @@ def plot_evals_lineplot(precomputed_evals, gammas, num_evals=None,
                 ('\nFat bar below indicates section of positive derivative' if mark_positive_slope else ''))
         plt.xlabel('$\gamma$')
         plt.ylabel('Eigenvalue')
-        plt.ylim((-1, ylim))
+        plt.ylim((ylim_lower, ylim))
         
     def plt_show():
+        plt.yscale(yscale)
         plt.legend(loc='upper right')
         plt.show()
 
@@ -267,7 +275,7 @@ def plot_evals_lineplot(precomputed_evals, gammas, num_evals=None,
             if one_plot_per_point: plt_init()
             if percentile_to_plot:
                 y_lim = np.percentile(evals, percentile_to_plot) + .2
-                plt.ylim((-1, y_lim))
+                plt.ylim((ylim_lower, y_lim))
 
             # reset color cycle
             plt.gca().set_prop_cycle(None)
