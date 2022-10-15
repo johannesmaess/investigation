@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.widgets import Slider, Button
 
-from helpers import x_W_H_C_R0
+from util.util_lrp_transformation_visualization import x_W_H_C_R0
 
 # The function to be called anytime a slider's value changes
 def update(_):

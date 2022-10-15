@@ -97,7 +97,7 @@ def global_conv_matrix(conv, bias=None, img_shape=None, zero_padding=(0,0),
 
 
 # calculate surrogate model
-def forw_surrogate_matrix(W, curr, gamma, checks=True):
+def forw_surrogate_matrix(W, curr, gamma, checks=True, normalization=True):
 
     # activation of following layer
     foll = W @ curr
@@ -108,23 +108,23 @@ def forw_surrogate_matrix(W, curr, gamma, checks=True):
     if checks:
         assert R_i_to_j.shape == W.shape
         assert (R_i_to_j @ curr).shape == (W.shape[0],)
-          
+
     # normalize it
-    res_unnormalized = R_i_to_j @ curr
-    forwards_ratio = foll / res_unnormalized
-    forwards_ratio[np.logical_and(foll == 0, res_unnormalized == 0)] = 1 # rule: 0/0 = 1 (this is an edge case that does not matter much)
+    if normalization:
+        res_unnormalized = R_i_to_j @ curr
+        forwards_ratio = foll / res_unnormalized
+        forwards_ratio[np.logical_and(foll == 0, res_unnormalized == 0)] = 1 # rule: 0/0 = 1 (this is an edge case that does not matter much)
 
+        R_i_to_j *= forwards_ratio[:, None]
 
-    R_i_to_j *= forwards_ratio[:, None]
-
-    if checks:
-        # check local equality of modified and original transtition matrix
-        assert np.allclose(R_i_to_j @ curr,  W @ curr, atol=0.0001), f"Too high difference in outputs. Maximum point-wise diff: {(R_i_to_j @ curr) - (W @ curr).abs().max()}"
+        if checks:
+            # check local equality of modified and original transtition matrix
+            assert np.allclose(R_i_to_j @ curr,  W @ curr, atol=0.0001), f"Too high difference in outputs. Maximum point-wise diff: {np.abs((R_i_to_j @ curr) - (W @ curr)).max()}"
     
     return R_i_to_j
 
 # calculate surrogate model
-def forw_surrogate_matrix_sparse(W, curr, gamma, checks='Warn only'):
+def forw_surrogate_matrix_sparse(W, curr, gamma, checks='Warn only', normalization=True):
 
     # activation of following layer
     foll = W @ curr
@@ -141,35 +141,36 @@ def forw_surrogate_matrix_sparse(W, curr, gamma, checks='Warn only'):
 
           
     # normalize it
-    res_unnormalized = R_i_to_j @ curr
-    forwards_ratio = foll / res_unnormalized
-    forwards_ratio[torch.logical_and(foll == 0, res_unnormalized == 0)] = 1 # rule: 0/0 = 1 (this is an edge case that does not matter much)
+    if normalization:
+        res_unnormalized = R_i_to_j @ curr
+        forwards_ratio = foll / res_unnormalized
+        forwards_ratio[torch.logical_and(foll == 0, res_unnormalized == 0)] = 1 # rule: 0/0 = 1 (this is an edge case that does not matter much)
 
-    indices = R_i_to_j.coalesce().indices()
-    x_indices = indices[0]
-    forwards_ratio_per_value = forwards_ratio[x_indices]
+        indices = R_i_to_j.coalesce().indices()
+        x_indices = indices[0]
+        forwards_ratio_per_value = forwards_ratio[x_indices]
 
-    R_i_to_j = torch.sparse_coo_tensor(indices = indices,
-                            values = R_i_to_j.coalesce().values() * forwards_ratio_per_value,
-                            size = R_i_to_j.shape)
+        R_i_to_j = torch.sparse_coo_tensor(indices = indices,
+                                values = R_i_to_j.coalesce().values() * forwards_ratio_per_value,
+                                size = R_i_to_j.shape)
 
-    if "warn" in checks.lower():
-        # check local equality of modified and original transtition matrix
-        if not np.allclose(R_i_to_j @ curr,  W @ curr, atol=0.002):
-            print(f"Warning: High difference in outputs (gamma = {gamma}). Maximum point-wise diff: {((R_i_to_j @ curr) - (W @ curr)).abs().max()}")
+        if "warn" in checks.lower():
+            # check local equality of modified and original transtition matrix
+            if not np.allclose(R_i_to_j @ curr,  W @ curr, atol=0.002):
+                print(f"Warning: High difference in outputs (gamma = {gamma}). Maximum point-wise diff: {np.abs((R_i_to_j @ curr) - (W @ curr)).max()}")
 
-    elif checks:
-        # check local equality of modified and original transtition matrix
-        assert np.allclose(R_i_to_j @ curr,  W @ curr, atol=0.002), f"Too high difference in outputs (gamma = {gamma}). Maximum point-wise diff: {((R_i_to_j @ curr) - (W @ curr)).abs().max()}"
+        elif checks:
+            # check local equality of modified and original transtition matrix
+            assert np.allclose(R_i_to_j @ curr,  W @ curr, atol=0.002), f"Too high difference in outputs (gamma = {gamma}). Maximum point-wise diff: {np.abs((R_i_to_j @ curr) - (W @ curr)).max()}"
 
     if checks == 2: # level for major checks
         print("Running checks of lvl 2. Dense matrix computation can take a while...")
 
-        R_i_to_j_dense = forw_surrogate_matrix(W.to_dense(), curr, gamma, checks=True)
+        R_i_to_j_dense = forw_surrogate_matrix(W.to_dense(), curr, gamma, checks=True, normalization=normalization)
         diff = (R_i_to_j_dense - R_i_to_j)
 
         print("Warning: We allow a high point-wise error of 0.2 in the forward matrix.") # We hope that this gets cancelled out well though, as the error is high absolute, but very low in relative terms.
-        assert np.allclose(diff, 0, atol=0.2), f"Too high difference in forward matrices (gamma = {gamma}). Maximum point-wise diff: {(R_i_to_j_dense - R_i_to_j).abs().max()}"
+        assert np.allclose(diff, 0, atol=0.2), f"Too high difference in forward matrices (gamma = {gamma}). Maximum point-wise diff: {np.abs(R_i_to_j_dense - R_i_to_j).max()}"
 
         print("The five largest error are:")
         for i in range(5):
@@ -179,20 +180,19 @@ def forw_surrogate_matrix_sparse(W, curr, gamma, checks='Warn only'):
 
     return R_i_to_j
 
-def calc_evals(W, point, gammas, num_evals=None):
-    forwards = [forw_surrogate_matrix(W, point, gamma) for gamma in gammas]
+def calc_evals(W, point, gammas, num_evals=None, return_evecs=False, normalization=True):
+    forwards = [forw_surrogate_matrix(W, point, gamma, normalization=normalization) for gamma in gammas]
     # backwards = [back_surrogate_matrix(W, point, gamma) for gamma in gammas]
 
     evals, evecs = list(zip(*[np.linalg.eig(forward) for forward in forwards]))
-    del evecs
 
     evals = np.array(evals)
-    # evecs = np.array(evecs)
+    evecs = np.array(evecs)
 
     # remove evals and evecs where eval is 0:
     is_non_zero = evals[0] != 0
     evals = evals[:, is_non_zero]
-    # evecs = evecs[:, is_non_zero, :]
+    evecs = evecs[:, is_non_zero, :]
 
     # sort by ascending abs(eigenvalues)
     evals = np.abs(evals)
@@ -206,13 +206,15 @@ def calc_evals(W, point, gammas, num_evals=None):
     x_index = np.ones(order.shape[1]) * np.arange(order.shape[0])[:, None]
     x_index = x_index.astype(int)
     evals = evals[x_index, order]
-    # evecs = evecs[x_index, order] todo
+    evecs = evecs[x_index, order] # todo
 
-    return evals
+    if not return_evecs: 
+        return evals
+    return evals, evecs
 
-def calc_evals_sparse(W, point, gammas, num_evals):
+def calc_evals_sparse(W, point, gammas, num_evals, normalization=True):
     # compute sparse matrices in Pytorch COO format
-    forwards = [forw_surrogate_matrix_sparse(W, point, gamma) for gamma in gammas]
+    forwards = [forw_surrogate_matrix_sparse(W, point, gamma, normalization=normalization) for gamma in gammas]
     # change from Pytorch COO sparse to scipy COO sparse
     forwards = [coo_array((forw.coalesce().values(), forw.coalesce().indices()), forw.shape) for forw in forwards]
 
@@ -224,55 +226,83 @@ def calc_evals_sparse(W, point, gammas, num_evals):
 
     return evals
 
-def calc_evals_batch(weights_list, points_list, gammas, num_evals=None):
+def calc_evals_batch(weights_list, points_list, gammas, num_evals=None, return_evecs=False, normalization=True):
     ### preemptive checks ###
     if np.any([type(W) is torch.Tensor and W.is_sparse for W in weights_list]):
         print("Running with at least one sparse matrix...")
         assert num_evals, "Running with sparse matrices, num_evals must be specified."
     if not num_evals:
         num_evals = min([min(W.shape) for W in weights_list])
-    print(num_evals)
     
     computed_evals = np.zeros((len(weights_list), len(points_list), len(gammas), num_evals))
+    if return_evecs:
+        computed_evecs = np.zeros((len(weights_list), len(points_list), len(gammas), num_evals, len(weights_list[0])))
 
     for i, W in enumerate(weights_list):
         for j, point in enumerate(points_list):
-            print(i,j)
+            # print(i,j)
             if type(W) is torch.Tensor and W.is_sparse:
-                computed_evals[i][j] = calc_evals_sparse(W, point, gammas, num_evals)
+                ret = calc_evals_sparse(W, point, gammas, num_evals, normalization=normalization) # TODO ret evecs
             else:
-                computed_evals[i][j] = calc_evals(W, point, gammas, num_evals) # warning: assignment might fail if func returns less than num_evals
+                ret = calc_evals(W, point, gammas, num_evals, normalization=normalization, return_evecs=return_evecs) # warning: assignment might fail if func returns less than num_evals
 
-    return computed_evals
+            if return_evecs: 
+                computed_evals[i][j], computed_evecs[i][j] = ret
+            else: 
+                computed_evals[i][j] = ret
+
+    if not return_evecs: 
+        return computed_evals
+    return computed_evals, computed_evecs
 
 
 def plot_evals_lineplot(precomputed_evals, gammas, num_evals=None, 
-                mark_positive_slope=True, percentile_to_plot=None, ylim=4, one_plot_per_point=False,
+                mark_positive_slope=True, percentile_to_plot=None, ylim=4, one_plot_per='weight',
                 yscale='linear'):
+
+    n_ax_dict = {
+        'in total': 1,
+        'weight': precomputed_evals.shape[0],
+        'point': precomputed_evals.shape[0] * precomputed_evals.shape[1]
+    }
+    assert one_plot_per in ['point', 'weight', 'in total']
+    n_ax = n_ax_dict[one_plot_per]
+
     ylim_lower = {'linear':0, 'log': .1}[yscale]
 
+    fig, axs = plt.subplots(1, n_ax, figsize=(5*n_ax, 3))
+    axs, ax_i, ax = np.array(axs).flatten(), -1, None
+
+    fig.suptitle('Evolution of abs(complex eigenvalues) with increasing $\gamma$' +
+            ('\nFat bar below indicates section of positive derivative' if mark_positive_slope else ''))
+
     ### helper functions ###
-    def plt_init():
-        plt.figure(figsize=(20,10))
-        plt.title('Evolution of abs(complex eigenvalues) with increasing $\gamma$' +
-                ('\nFat bar below indicates section of positive derivative' if mark_positive_slope else ''))
-        plt.xlabel('$\gamma$')
-        plt.ylabel('Eigenvalue')
-        plt.ylim((ylim_lower, ylim))
+    def ax_init():
+        nonlocal axs, ax, ax_i
+        # iterate to next ax
+        ax_i += 1
+        ax = axs[ax_i]
+
+        # plt.figure(figsize=(20,10))
+        ax.set_xlabel('$\gamma$')
+        ax.set_ylabel('Eigenvalue')
+        ax.set_ylim((ylim_lower, ylim))
         
-    def plt_show():
-        plt.yscale(yscale)
-        plt.legend(loc='upper right')
-        plt.show()
+    def ax_show():
+        nonlocal ax
+        ax.set_yscale(yscale)
+        ax.legend(loc='upper right')
 
     ### preemptive checks ###
     assert np.all([[len(line) == len(gammas) for line in sub_list] for sub_list in precomputed_evals]), "Shape doesn't match."
 
+    if one_plot_per=='in total': ax_init()
+
     for i, data_for_one_matrix_for_all_points in enumerate(precomputed_evals): # iterate matrices
-        if not one_plot_per_point: plt_init()
+        if one_plot_per=='weight': ax_init()
 
         for j, evals in enumerate(data_for_one_matrix_for_all_points): # iterate points
-            if one_plot_per_point: plt_init()
+            if one_plot_per=='point': ax_init()
             if percentile_to_plot:
                 y_lim = np.percentile(evals, percentile_to_plot) + .2
                 plt.ylim((ylim_lower, y_lim))
@@ -282,7 +312,7 @@ def plot_evals_lineplot(precomputed_evals, gammas, num_evals=None,
             # plot for this point
             Y = evals + np.random.normal(0, .005, size=evals.shape[1])[None, :] # add some random noise, such that lines don't overlap.
             labels = [f'Exp. {i+1}, Point {j+1}, EV {k+1}' for k in range(evals.shape[1])]
-            plt.plot(gammas, Y, label=labels)
+            ax.plot(gammas, Y, label=labels)
 
             if mark_positive_slope: # plot a scatter dot if the series values is increasing
                 # calc sign of derivative
@@ -293,7 +323,8 @@ def plot_evals_lineplot(precomputed_evals, gammas, num_evals=None,
                 for k, is_pos, label in zip(range(100), is_positive.T, [f'Point {j+1}, EV {k+1} (Increasing segment)' for k in range(evals.shape[1])]):
                     x = gammas[:-1][is_pos]
                     y = np.full_like(x, -.2 -.05*k - .15*j)
-                    plt.scatter(x,y, s=5)
+                    ax.scatter(x,y, s=5)
 
-            if one_plot_per_point: plt_show()
-        if not one_plot_per_point: plt_show()
+            if one_plot_per=='point': ax_show()
+        if one_plot_per=='weight': ax_show()
+    if one_plot_per=='in total': ax_show()

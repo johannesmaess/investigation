@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 from matplotlib.widgets import Slider, Button
 from matplotlib.patches import FancyArrow, Circle
 
-from helpers import h0_W_h1_R1_C_R0
+from util.util_lrp_transformation_visualization import h0_W_h1_R1_C_R0
 
 def visualize_mc_matrix_transform(M, IN, c="blue", ax=None, patches={}, annotate_with=None):
     if not ax:
@@ -91,7 +91,7 @@ def update(_):
     if 'lrp_result' in patches_C: patches_C['lrp_result'].remove()
     patches_C['lrp_result'] = ax.add_patch(Circle(R0, radius=.03, color='orange'))
     
-    plot_explicit_biases = True
+    plot_explicit_biases = False
     ### explicit biases ###
     if plot_explicit_biases:
         W_eb = np.block([[(W - W.min(axis=1, keepdims=True)), np.eye(2)], 
