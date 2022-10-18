@@ -99,18 +99,19 @@ def global_conv_matrix(conv, bias=None, img_shape=None, zero_padding=(0,0),
 # calculate surrogate model
 def forw_surrogate_matrix(W, curr, gamma, checks=True, normalization=True):
 
-    # activation of following layer
-    foll = W @ curr
-    
+    assert ((curr is None) != normalization), "A reference point is needed iff. normalization==True (and the original models activations are supposed to be recovered)."
+
     # create unnormalized gamma forward matrix
     R_i_to_j = W + gamma * np.clip(W, 0, None)
     
     if checks:
         assert R_i_to_j.shape == W.shape
-        assert (R_i_to_j @ curr).shape == (W.shape[0],)
 
     # normalize it
     if normalization:
+        # activation of following layer
+        foll = W @ curr
+        
         res_unnormalized = R_i_to_j @ curr
         forwards_ratio = foll / res_unnormalized
         forwards_ratio[np.logical_and(foll == 0, res_unnormalized == 0)] = 1 # rule: 0/0 = 1 (this is an edge case that does not matter much)
@@ -119,16 +120,13 @@ def forw_surrogate_matrix(W, curr, gamma, checks=True, normalization=True):
 
         if checks:
             # check local equality of modified and original transtition matrix
+            curr = np.random.normal(1, .2, size=len(R_i_to_j))
             assert np.allclose(R_i_to_j @ curr,  W @ curr, atol=0.0001), f"Too high difference in outputs. Maximum point-wise diff: {np.abs((R_i_to_j @ curr) - (W @ curr)).max()}"
     
     return R_i_to_j
 
-# calculate surrogate model
+# calculate surrogate model - sparse
 def forw_surrogate_matrix_sparse(W, curr, gamma, checks='Warn only', normalization=True):
-
-    # activation of following layer
-    foll = W @ curr
-    
     # create unnormalized gamma forward matrix
     clipped = torch.sparse_coo_tensor(indices = W.coalesce().indices(),
                                         values = W.coalesce().values().clip(0,None),
@@ -137,11 +135,12 @@ def forw_surrogate_matrix_sparse(W, curr, gamma, checks='Warn only', normalizati
     
     if checks:
         assert R_i_to_j.shape == W.shape
-        assert (R_i_to_j @ curr).shape == (W.shape[0],)
-
           
     # normalize it
     if normalization:
+        # activation of following layer
+        foll = W @ curr
+
         res_unnormalized = R_i_to_j @ curr
         forwards_ratio = foll / res_unnormalized
         forwards_ratio[torch.logical_and(foll == 0, res_unnormalized == 0)] = 1 # rule: 0/0 = 1 (this is an edge case that does not matter much)
@@ -180,7 +179,7 @@ def forw_surrogate_matrix_sparse(W, curr, gamma, checks='Warn only', normalizati
 
     return R_i_to_j
 
-def calc_evals(W, point, gammas, num_evals=None, return_evecs=False, normalization=True):
+def calc_evals(W, point, gammas, num_evals=None, return_evecs=False, normalization=True, return_only_non_zero=True):
     forwards = [forw_surrogate_matrix(W, point, gamma, normalization=normalization) for gamma in gammas]
     # backwards = [back_surrogate_matrix(W, point, gamma) for gamma in gammas]
 
@@ -189,10 +188,11 @@ def calc_evals(W, point, gammas, num_evals=None, return_evecs=False, normalizati
     evals = np.array(evals)
     evecs = np.array(evecs)
 
-    # remove evals and evecs where eval is 0:
-    is_non_zero = evals[0] != 0
-    evals = evals[:, is_non_zero]
-    evecs = evecs[:, is_non_zero, :]
+    if return_only_non_zero:
+        # remove evals and evecs where eval is 0:
+        is_non_zero = evals[0] != 0
+        evals = evals[:, is_non_zero]
+        evecs = evecs[:, is_non_zero, :]
 
     # sort by ascending abs(eigenvalues)
     evals = np.abs(evals)
@@ -228,11 +228,18 @@ def calc_evals_sparse(W, point, gammas, num_evals, normalization=True):
 
 def calc_evals_batch(weights_list, points_list, gammas, num_evals=None, return_evecs=False, normalization=True):
     ### preemptive checks ###
-    if np.any([type(W) is torch.Tensor and W.is_sparse for W in weights_list]):
-        print("Running with at least one sparse matrix...")
-        assert num_evals, "Running with sparse matrices, num_evals must be specified."
-    if not num_evals:
+    if not num_evals: # lower bound
         num_evals = min([min(W.shape) for W in weights_list])
+    else: # upper bound
+        maxi = max([max(W.shape) for W in weights_list])
+        if maxi < num_evals:
+            print(f"Warn: too high number of evals requested ({num_evals}). We instead return {maxi}.")
+            num_evals = maxi
+
+    if (not normalization):
+        if (points_list is not None) or (type(points_list) is list and len(points_list) > 1):
+            print("Note: Without normlization, the forward matrix is not reference point dependent.\nFunction will only return one Eval set per weight matrix.")
+        points_list = [None]
     
     computed_evals = np.zeros((len(weights_list), len(points_list), len(gammas), num_evals))
     if return_evecs:
@@ -241,10 +248,14 @@ def calc_evals_batch(weights_list, points_list, gammas, num_evals=None, return_e
     for i, W in enumerate(weights_list):
         for j, point in enumerate(points_list):
             # print(i,j)
-            if type(W) is torch.Tensor and W.is_sparse:
-                ret = calc_evals_sparse(W, point, gammas, num_evals, normalization=normalization) # TODO ret evecs
+            if type(W) is torch.Tensor and W.is_sparse: # sparse
+                if not num_evals or num_evals >= len(W): # sparse, but all EVs requested
+                    # compute in dense pipeline
+                    ret = calc_evals(W.to_dense().numpy(), point, gammas, num_evals=len(W), normalization=normalization, return_evecs=return_evecs, return_only_non_zero=False)    
+                else:
+                    ret = calc_evals_sparse(W, point, gammas, num_evals, normalization=normalization) # TODO ret evecs
             else:
-                ret = calc_evals(W, point, gammas, num_evals, normalization=normalization, return_evecs=return_evecs) # warning: assignment might fail if func returns less than num_evals
+                ret = calc_evals(W, point, gammas, num_evals, normalization=normalization, return_evecs=return_evecs, return_only_non_zero=False) # warning: assignment might fail if func returns less than num_evals
 
             if return_evecs: 
                 computed_evals[i][j], computed_evecs[i][j] = ret
@@ -256,9 +267,13 @@ def calc_evals_batch(weights_list, points_list, gammas, num_evals=None, return_e
     return computed_evals, computed_evecs
 
 
-def plot_evals_lineplot(precomputed_evals, gammas, num_evals=None, 
-                mark_positive_slope=True, percentile_to_plot=None, ylim=4, one_plot_per='weight',
+def plot_evals_lineplot(precomputed_evals, gammas, 
+                num_evals=None, mark_positive_slope=True, percentile_to_plot=None, ylim=4, one_plot_per='weight',
                 yscale='linear'):
+
+    # reduce number of eval lines to show
+    if num_evals:
+        precomputed_evals = precomputed_evals[:, :, :, :num_evals]
 
     n_ax_dict = {
         'in total': 1,
@@ -270,7 +285,8 @@ def plot_evals_lineplot(precomputed_evals, gammas, num_evals=None,
 
     ylim_lower = {'linear':0, 'log': .1}[yscale]
 
-    fig, axs = plt.subplots(1, n_ax, figsize=(5*n_ax, 3))
+    figsize = (5*n_ax, 3) if n_ax>1 else (20, 10)
+    fig, axs = plt.subplots(1, n_ax, figsize=figsize)
     axs, ax_i, ax = np.array(axs).flatten(), -1, None
 
     fig.suptitle('Evolution of abs(complex eigenvalues) with increasing $\gamma$' +
