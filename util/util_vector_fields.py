@@ -28,7 +28,7 @@ def plot_vector_field(A=None, trans=None, lims = np.array([-1.1, 1.1]), n_points
     
     projs = (A @ vecs.T).T if (A is not None) else trans(vecs)
 
-    if point_in_green:
+    if point_in_green is not None:
         target = A@point_in_green if (A is not None) else trans(point_in_green)
         ax.arrow(*point_in_green, *(target - point_in_green), color='green')
         
@@ -47,12 +47,17 @@ def plot_vector_field(A=None, trans=None, lims = np.array([-1.1, 1.1]), n_points
         for vec, diff in zip(vecs, diffs):
             ax.arrow(*vec, *diff)
 
-def plot_vector_field_batch(matrices_list, figscale=5, **kwargs):
+def plot_vector_field_batch(matrices_list, figscale=5, point_in_green=None, xlims=None, ylims=None, **kwargs):
     n = len(matrices_list)
     fig, axs = plt.subplots(1, n, figsize=(n*figscale*1.1, figscale), sharex=True, sharey=True)
+    axs = np.array(axs).flatten()
     for A, ax in zip(matrices_list, axs):
-        ax.set_aspect(1)
-        plot_vector_field(A=A, ax=ax, **kwargs)
+        if ylims or xlims:   
+            ax.set_xlim(xlims)
+            ax.set_ylim(ylims)
+        else:       
+            ax.set_aspect(1)
+        plot_vector_field(A=A, ax=ax, point_in_green=point_in_green, **kwargs)
 
 
 ### print util ###
