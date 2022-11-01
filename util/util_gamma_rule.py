@@ -8,6 +8,8 @@ from scipy.sparse.linalg import eigs
 import matplotlib.pyplot as plt
 import seaborn as sns
 
+from tqdm import tqdm
+
 
 # TODO: maybe I should change this function to handle soarse matrices in Scipy, as it has more features than Sparse Pytorch.
 def global_conv_matrix(conv, bias=None, img_shape=None, zero_padding=(0,0),
@@ -92,10 +94,7 @@ def global_conv_matrix(conv, bias=None, img_shape=None, zero_padding=(0,0),
         y_indices_translation = column_mask.cumsum() - 1
         y_indices = y_indices_translation[y_indices]
 
-        indices = np.vstack([x_indices, y_indices])
-        trans = torch.sparse_coo_tensor(indices = indices,
-                                        values = values,
-                                        size=(res_flattened_length, img_flattened_length))
+        trans = coo_array((values, (x_indices, y_indices)), shape=(res_flattened_length, img_flattened_length))
 
     return trans
 
@@ -106,13 +105,15 @@ def forw_surrogate_matrix(W, curr, gamma, checks=True, recover_activations=True,
     # create unnormalized gamma forward matrix
     if not smart_gamma_func: 
         # apply one gamma parameter globally
-        R_i_to_j = W + np.clip(W, 0, None) * gamma
+        R_i_to_j = W + W * (W > 0) * gamma
     else: 
         assert gamma >= 0 and gamma < 1, f"If smart_gamma_func is given, gamma ({gamma}) should be a scale parameter between 0 and 1."
+
         # obtain maximum valid gamma per per row of matrix by function. Then use the 'gamma' parameter (range 0 to 1) to scale up to these row-wise maxima.
         gamma_per_row = smart_gamma_func(W, curr)
         assert len(gamma_per_row.shape) == 1 and gamma_per_row.shape[0] == W.shape[0], "The return of smart_gamma_func does not fit to the weight matrix W."
-        R_i_to_j = W + np.clip(W, 0, None) * gamma * gamma_per_row[:, None]
+
+        R_i_to_j = W + W * (W > 0) * gamma * gamma_per_row[:, None]
     
     if checks:
         assert R_i_to_j.shape == W.shape
@@ -139,10 +140,7 @@ def forw_surrogate_matrix(W, curr, gamma, checks=True, recover_activations=True,
 # calculate surrogate model - sparse
 def forw_surrogate_matrix_sparse(W, curr, gamma, checks='Warn only', recover_activations=True):
     # create unnormalized gamma forward matrix
-    clipped = torch.sparse_coo_tensor(indices = W.coalesce().indices(),
-                                        values = W.coalesce().values().clip(0,None),
-                                        size = W.shape)
-    R_i_to_j = W + gamma * clipped
+    R_i_to_j = W + gamma * (W * (W > 0))
     
     if checks:
         assert R_i_to_j.shape == W.shape
@@ -154,19 +152,13 @@ def forw_surrogate_matrix_sparse(W, curr, gamma, checks='Warn only', recover_act
 
         res_unnormalized = R_i_to_j @ curr
         forwards_ratio = foll / res_unnormalized
-        forwards_ratio[torch.logical_and(foll == 0, res_unnormalized == 0)] = 1 # rule: 0/0 = 1 (this is an edge case that does not matter much)
+        forwards_ratio[np.logical_and(foll == 0, res_unnormalized == 0)] = 1 # rule: 0/0 = 1 (this is an edge case that does not matter much)
 
-        indices = R_i_to_j.coalesce().indices()
-        x_indices = indices[0]
-        forwards_ratio_per_value = forwards_ratio[x_indices]
-
-        R_i_to_j = torch.sparse_coo_tensor(indices = indices,
-                                values = R_i_to_j.coalesce().values() * forwards_ratio_per_value,
-                                size = R_i_to_j.shape)
+        R_i_to_j *= forwards_ratio[:, None]
 
         if "warn" in checks.lower():
             # check local equality of modified and original transtition matrix
-            if not np.allclose(R_i_to_j @ curr,  W @ curr, atol=0.002):
+            if not np.allclose(R_i_to_j @ curr,  W @ curr, atol=0.002): 
                 print(f"Warning: High difference in outputs (gamma = {gamma}). Maximum point-wise diff: {np.abs((R_i_to_j @ curr) - (W @ curr)).max()}")
 
         elif checks:
@@ -197,9 +189,10 @@ def back_matrix(W, curr, gamma, smart_gamma_func=None, log=False):
 
     R_j_and_i   = R_j_given_i * curr[None, :]
     R_i_and_j   = R_j_and_i.T
-    R_j         = R_i_and_j.sum(axis=0, keepdims=True)
-    R_i_given_j = R_i_and_j / R_j
-    
+    R_j         = R_i_and_j.sum(axis=0)
+    R_j.resize((1, R_j.shape[0]))
+    R_i_given_j = R_i_and_j * (1 / R_j) # we multiply by the reciprocal, as direct multiplication would turn coo_arrays into dense matrices
+
     if log:
         print('R_j_given_i\n', R_j_given_i)
         print('R_j_and_i\n', R_j_and_i)
@@ -249,25 +242,24 @@ def calc_evals(W, point, gammas, num_evals=None, return_evecs=False, mode="forw 
         return evals
     return evals, evecs
 
-def calc_evals_sparse(W, point, gammas, num_evals, mode="forw recover activations", return_evecs=False):
+def calc_evals_sparse(W, point, gammas, num_evals, mode="forw recover activations", return_evecs=False, smart_gamma_func=None):
     matrix_func_dict = {
-        "forw recover activations":      partial(forw_surrogate_matrix_sparse, recover_activations=True), 
-        "forw":  partial(forw_surrogate_matrix_sparse, recover_activations=False), 
-        # "back": back_matrix
+        "forw recover activations": partial(forw_surrogate_matrix_sparse, recover_activations=True), 
+        "forw":                     partial(forw_surrogate_matrix_sparse, recover_activations=False), 
+        "back":                     back_matrix # note: since using scipy sparse coo, the distinct _sparse functions are largely unnecessary. eg. here we use the normal back_matrix, which calls the normal forw_matrix. we can simplify the code further later.
     }
     assert mode in matrix_func_dict
     matrix_func = matrix_func_dict[mode]
     
     # compute sparse matrices in Pytorch COO format
-    forwards = [matrix_func(W, point, gamma) for gamma in gammas]
-    # change from Pytorch COO sparse to scipy COO sparse
-    forwards = [coo_array((forw.coalesce().values(), forw.coalesce().indices()), forw.shape) for forw in forwards]
+    forwards = [matrix_func(W, point, gamma, smart_gamma_func=smart_gamma_func) for gamma in gammas]
 
-    evals, evecs = list(zip(*[eigs(forward, k=num_evals) for forward in forwards]))
+    assert not return_evecs, 'Not implemented'
+    
+    evals = [eigs(forward, k=num_evals)[0] for forward in tqdm(forwards)]
 
     evals = np.array(evals)
-    assert not return_evecs, 'Not implemented'
-    del evecs
+    # del evecs
     evals = np.abs(evals) # NOTE: we only analyse abs(EV) so far
 
     return evals
@@ -295,8 +287,8 @@ def calc_evals_batch(weights_list, points_list, gammas=np.linspace(0,1,201)[:-1]
 
     for i, W in enumerate(weights_list):
         for j, point in enumerate(points_list):
-            if type(W) is torch.Tensor and W.is_sparse: # sparse
-                if not num_evals or num_evals >= len(W): # sparse, but all EVs requested
+            if type(W) is coo_array: # sparse
+                if not num_evals or num_evals >= W.shape[0]: # sparse, but all EVs requested
                     # compute in dense pipeline
                     ret = calc_evals(W.to_dense().numpy(), point, gammas, num_evals=len(W), **kwargs)    
                 else:
@@ -315,7 +307,7 @@ def calc_evals_batch(weights_list, points_list, gammas=np.linspace(0,1,201)[:-1]
 
 def plot_evals_lineplot(precomputed_evals, gammas=np.linspace(0,1,201)[:-1], 
                 num_evals=None, mark_positive_slope=False, percentile_to_plot=None, ylim=4, one_plot_per='weight',
-                yscale='linear'):
+                yscale='linear', green_line_at_x=None):
     """
     Plots the evolution of Eigenvalues with increasing gammas in a lineplot.
     """
@@ -353,7 +345,7 @@ def plot_evals_lineplot(precomputed_evals, gammas=np.linspace(0,1,201)[:-1],
         ax.set_ylabel('Eigenvalue')
         ax.set_ylim((ylim_lower, ylim))
 
-        ax.axvline(.25, color="green")
+        if green_line_at_x is not None: ax.axvline(green_line_at_x, color="green")
         
     def ax_show():
         nonlocal ax
@@ -426,24 +418,24 @@ def eval_peak_distribution_plot(computed_evals, gammas, weights_lbls=None):
 
     return peak_gammas
 
-def calc_gamma_for_sign_flip(W, points_list, log=False):
-    points_list = np.array(points_list)
+def calc_gamma_for_sign_flip(W, curr, log=False):
 
-    # Broadcast them too three dimensions: (Points, Weight dim 1, Weight dim 2)
+    # Multiply weights * earlier layer activations.
     # Then mask them out by if they are positive
-    # Then sum axis 2, to obtain get sum at negative/positive entry positions.
-    sum_at_pos_weight_entries = (W[None, :, :] * points_list[:, None, :] *   (W > 0)[None, :, :]).sum(axis=2)
-    sum_at_neg_weight_entries = (W[None, :, :] * points_list[:, None, :] *  (W <= 0)[None, :, :]).sum(axis=2)
-    peaks_for_one_weight = - sum_at_neg_weight_entries / sum_at_pos_weight_entries - 1
+    # Then sum axis 1 to obtain row-wise sum at negative/positive entry positions.
+
+    sum_at_pos_weight_entries = (W * curr[None, :] * (W > 0)).sum(axis=1)
+    sum_at_neg_weight_entries = (W * curr[None, :] * (W < 0)).sum(axis=1)
+    gamma_at_sign_flip = - sum_at_neg_weight_entries / sum_at_pos_weight_entries - 1
     
     if log:
         print('W\n', W)
-        print('W[None, :, :] * points_list[:, None, :]\n', W[None, :, :] * points_list[:, None, :])
+        print('W * curr[None, :]\n', W * curr[None, :])
         print('sum_at_pos_weight_entries\n', sum_at_pos_weight_entries)
         print('sum_at_neg_weight_entries\n', sum_at_neg_weight_entries)
-        print('peaks_for_one_weight\n', peaks_for_one_weight)
+        print('gamma_at_sign_flip\n', gamma_at_sign_flip)
 
-    return peaks_for_one_weight
+    return gamma_at_sign_flip
     
 
 def sign_flip_distribution_plot(weights_list, points_list, weights_lbls, mode='back', gammaRange=(0, 3)):
@@ -458,7 +450,7 @@ def sign_flip_distribution_plot(weights_list, points_list, weights_lbls, mode='b
     fig, axs = plt.subplots(1, n, sharey=True, figsize=(n*1.1, 5))
 
     for W, ax, lbl in zip(weights_list, axs, weights_lbls):
-        peaks_for_one_weight = calc_gamma_for_sign_flip(W, points_list)
+        peaks_for_one_weight = np.array([calc_gamma_for_sign_flip(W, p) for p in points_list]) # <-- untested change
         peaks_per_weight.append(peaks_for_one_weight)
 
         is_below_bound = peaks_for_one_weight <= gammaRange[0]
@@ -480,8 +472,7 @@ def smart_gamma_func(W, curr, lower_bound=0, lower_bound_handling=0., upper_boun
     """
     Returns a maximum suggested gamma parameter per row of the transition matrix W, given the current data point gamma. 
     """
-    # calc_gamma_for_sign_flip expects (and returns for) a set of points, so we do some broadcasting:
-    gammas = calc_gamma_for_sign_flip(W, curr[None], log=False)[0]
+    gammas = calc_gamma_for_sign_flip(W, curr, log=False)
 
     if log: print(gammas, end=' ')
 
