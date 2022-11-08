@@ -129,69 +129,27 @@ def forw_surrogate_matrix(W, curr, gamma, checks=True, recover_activations=True,
 
         R_i_to_j *= forwards_ratio[:, None]
 
-        if checks:
+        if checks==True:
             # check local equality of modified and original transtition matrix
-            np.random.seed(1)
-            curr = np.random.normal(1, .2, size=len(R_i_to_j))
-            assert np.allclose(R_i_to_j @ curr,  W @ curr, atol=0.002), f"Too high difference in outputs. Maximum point-wise diff: {np.abs((R_i_to_j @ curr) - (W @ curr)).max()}"
-    
-    return R_i_to_j
-
-# calculate surrogate model - sparse
-def forw_surrogate_matrix_sparse(W, curr, gamma, checks='Warn only', recover_activations=True):
-    # create unnormalized gamma forward matrix
-    R_i_to_j = W + gamma * (W * (W > 0))
-    
-    if checks:
-        assert R_i_to_j.shape == W.shape
-          
-    # normalize it
-    if recover_activations:
-        # activation of following layer
-        foll = W @ curr
-
-        res_unnormalized = R_i_to_j @ curr
-        forwards_ratio = foll / res_unnormalized
-        forwards_ratio[np.logical_and(foll == 0, res_unnormalized == 0)] = 1 # rule: 0/0 = 1 (this is an edge case that does not matter much)
-
-        R_i_to_j *= forwards_ratio[:, None]
-
-        if "warn" in checks.lower():
+            assert np.allclose(R_i_to_j @ curr,  W @ curr, atol=0.002), f"Too high difference in outputs (gamma = {gamma}). Maximum point-wise diff: {np.abs((R_i_to_j @ curr) - (W @ curr)).max()}"
+        elif "warn" in checks.lower():
             # check local equality of modified and original transtition matrix
             if not np.allclose(R_i_to_j @ curr,  W @ curr, atol=0.002): 
                 print(f"Warning: High difference in outputs (gamma = {gamma}). Maximum point-wise diff: {np.abs((R_i_to_j @ curr) - (W @ curr)).max()}")
 
-        elif checks:
-            # check local equality of modified and original transtition matrix
-            assert np.allclose(R_i_to_j @ curr,  W @ curr, atol=0.002), f"Too high difference in outputs (gamma = {gamma}). Maximum point-wise diff: {np.abs((R_i_to_j @ curr) - (W @ curr)).max()}"
-
-    if checks == 2: # level for major checks
-        print("Running checks of lvl 2. Dense matrix computation can take a while...")
-
-        R_i_to_j_dense = forw_surrogate_matrix(W.to_dense(), curr, gamma, checks=True, recover_activations=recover_activations)
-        diff = (R_i_to_j_dense - R_i_to_j)
-
-        print("Warning: We allow a high point-wise error of 0.2 in the forward matrix.") # We hope that this gets cancelled out well though, as the error is high absolute, but very low in relative terms.
-        assert np.allclose(diff, 0, atol=0.2), f"Too high difference in forward matrices (gamma = {gamma}). Maximum point-wise diff: {np.abs(R_i_to_j_dense - R_i_to_j).max()}"
-
-        print("The five largest error are:")
-        for i in range(5):
-            ind = (np.unravel_index(diff.abs().argmax(), shape=R_i_to_j_dense.shape))
-            print(ind, diff[ind], R_i_to_j_dense[ind], R_i_to_j[ind])
-            diff[ind] = 0
-
+    
     return R_i_to_j
 
 def back_matrix(W, curr, gamma, smart_gamma_func=None, log=False):
     assert curr is not None, "Reference point needed for for backward matrix"
 
-    R_j_given_i = forw_surrogate_matrix(W, curr, gamma, checks=True, recover_activations=False, smart_gamma_func=smart_gamma_func)
+    R_j_given_i = forw_surrogate_matrix(W, curr, gamma, checks=True, recover_activations=True, smart_gamma_func=smart_gamma_func)
 
     R_j_and_i   = R_j_given_i * curr[None, :]
     R_i_and_j   = R_j_and_i.T
     R_j         = R_i_and_j.sum(axis=0)
     R_j.resize((1, R_j.shape[0]))
-    R_i_given_j = R_i_and_j * (1 / R_j) # we multiply by the reciprocal, as direct multiplication would turn coo_arrays into dense matrices
+    R_i_given_j = R_i_and_j * (1 / R_j) # we multiply by the reciprocal, as direct division would turn coo_arrays into dense matrices
 
     if log:
         print('R_j_given_i\n', R_j_given_i)
@@ -202,7 +160,10 @@ def back_matrix(W, curr, gamma, smart_gamma_func=None, log=False):
 
     return R_i_given_j
 
-def calc_evals(W, point, gammas, num_evals=None, return_evecs=False, mode="forw recover activations", smart_gamma_func=None, return_only_non_zero=False):
+def calc_evals(W, point, gammas, num_evals=None, return_evecs=False, mode="forw recover activations", smart_gamma_func=None, abs_evals=True):
+    
+    if num_evals is None: num_evals = W.shape[0]
+
     matrix_func_dict = {
         "forw recover activations": partial(forw_surrogate_matrix, recover_activations=True), 
         "forw":                     partial(forw_surrogate_matrix, recover_activations=False), 
@@ -213,56 +174,43 @@ def calc_evals(W, point, gammas, num_evals=None, return_evecs=False, mode="forw 
 
     forwards = [matrix_func(W, point, gamma, smart_gamma_func=smart_gamma_func) for gamma in gammas]
 
-    evals, evecs = list(zip(*[np.linalg.eig(forward) for forward in forwards]))
+    evals, evecs = [], []
+    for M in tqdm(forwards):
+        if type(M) is np.ndarray:
+            vals, vecs = np.linalg.eig(M)
+        elif type(M) is coo_array:
+            if num_evals < M.shape[0]:
+                vals, vecs = eigs(M, k=num_evals)
+            else:
+                # falls back to dense matrix eigendecomposition
+                vals, vecs = np.linalg.eig(M.toarray())
+        else:
+            assert False, f"matrix of type {type(M)} not supported."
+
+        evals.append(vals)
+        if return_evecs:
+            evecs.append(vecs.T)
 
     evals = np.array(evals)
-    evecs = np.array(evecs)
-
-    if return_only_non_zero:
-        # remove evals and evecs where eval is 0:
-        is_non_zero = evals[0] != 0
-        evals = evals[:, is_non_zero]
-        evecs = evecs[:, is_non_zero, :]
+    if return_evecs:
+        evecs = np.array(evecs)
 
     # sort by ascending abs(eigenvalues)
-    evals = np.abs(evals)
-    order = np.argsort(-evals, axis=1)
+    if abs_evals: evals = np.abs(evals)
+    order = np.argsort(-np.abs(evals), axis=1)
 
     if num_evals and num_evals < evals.shape[1]:
         order = order[:, :num_evals]
 
-    # print(f"Matrix {i+1}, Point {j+1}: {is_non_zero.sum()} of {evals.shape[1]} Eigenvalues are non-zero. {order.shape[1]} get plotted.")
-
     x_index = np.ones(order.shape[1]) * np.arange(order.shape[0])[:, None]
     x_index = x_index.astype(int)
     evals = evals[x_index, order]
-    evecs = evecs[x_index, order] # todo
 
     if not return_evecs: 
         return evals
+
+    evecs = evecs[x_index, order]
     return evals, evecs
-
-def calc_evals_sparse(W, point, gammas, num_evals, mode="forw recover activations", return_evecs=False, smart_gamma_func=None):
-    matrix_func_dict = {
-        "forw recover activations": partial(forw_surrogate_matrix_sparse, recover_activations=True), 
-        "forw":                     partial(forw_surrogate_matrix_sparse, recover_activations=False), 
-        "back":                     back_matrix # note: since using scipy sparse coo, the distinct _sparse functions are largely unnecessary. eg. here we use the normal back_matrix, which calls the normal forw_matrix. we can simplify the code further later.
-    }
-    assert mode in matrix_func_dict
-    matrix_func = matrix_func_dict[mode]
-    
-    # compute sparse matrices in Pytorch COO format
-    forwards = [matrix_func(W, point, gamma, smart_gamma_func=smart_gamma_func) for gamma in gammas]
-
-    assert not return_evecs, 'Not implemented'
-    
-    evals = [eigs(forward, k=num_evals)[0] for forward in tqdm(forwards)]
-
-    evals = np.array(evals)
-    # del evecs
-    evals = np.abs(evals) # NOTE: we only analyse abs(EV) so far
-
-    return evals
 
 def calc_evals_batch(weights_list, points_list, gammas=np.linspace(0,1,201)[:-1], num_evals=None, **kwargs): # kwargs can include 'mode', 'return_evecs' and 'smart_gamma_func'
     return_evecs = kwargs['return_evecs'] if 'return_evecs' in kwargs else False
@@ -283,18 +231,11 @@ def calc_evals_batch(weights_list, points_list, gammas=np.linspace(0,1,201)[:-1]
     
     computed_evals = np.zeros((len(weights_list), len(points_list), len(gammas), num_evals))
     if return_evecs:
-        computed_evecs = np.zeros((len(weights_list), len(points_list), len(gammas), num_evals, len(weights_list[0])))
+        computed_evecs = np.zeros((len(weights_list), len(points_list), len(gammas), num_evals, weights_list[0].shape[0]))
 
     for i, W in enumerate(weights_list):
         for j, point in enumerate(points_list):
-            if type(W) is coo_array: # sparse
-                if not num_evals or num_evals >= W.shape[0]: # sparse, but all EVs requested
-                    # compute in dense pipeline
-                    ret = calc_evals(W.to_dense().numpy(), point, gammas, num_evals=len(W), **kwargs)    
-                else:
-                    ret = calc_evals_sparse(W, point, gammas, num_evals, **kwargs) # TODO ret evecs
-            else:
-                ret = calc_evals(W, point, gammas, num_evals, **kwargs) # warning: assignment might fail if func returns less than num_evals
+            ret = calc_evals(W, point, gammas, num_evals, **kwargs)
             if return_evecs: 
                 computed_evals[i][j], computed_evecs[i][j] = ret
             else: 
@@ -324,7 +265,7 @@ def plot_evals_lineplot(precomputed_evals, gammas=np.linspace(0,1,201)[:-1],
     assert one_plot_per in ['point', 'weight', 'in total']
     n_ax = n_ax_dict[one_plot_per]
 
-    ylim_lower = {'linear':0, 'log': .1}[yscale]
+    y_lim_lower = {'linear':0, 'log': .1}[yscale]
 
     figsize = (5*n_ax, 3) if n_ax>1 else (20, 10)
     fig, axs = plt.subplots(1, n_ax, figsize=figsize)
@@ -343,7 +284,7 @@ def plot_evals_lineplot(precomputed_evals, gammas=np.linspace(0,1,201)[:-1],
         # plt.figure(figsize=(20,10))
         ax.set_xlabel('$\gamma$')
         ax.set_ylabel('Eigenvalue')
-        ax.set_ylim((ylim_lower, ylim))
+        ax.set_ylim((y_lim_lower, ylim))
 
         if green_line_at_x is not None: ax.axvline(green_line_at_x, color="green")
         
@@ -363,8 +304,16 @@ def plot_evals_lineplot(precomputed_evals, gammas=np.linspace(0,1,201)[:-1],
         for j, evals in enumerate(data_for_one_matrix_for_all_points): # iterate points
             if one_plot_per=='point': ax_init()
             if percentile_to_plot:
-                y_lim = np.percentile(evals, percentile_to_plot) + .2
-                ax.set_ylim((ylim_lower, y_lim))
+                if np.all(precomputed_evals >= 0):
+                    y_lim_upper = np.percentile(evals, percentile_to_plot) + .2
+                    ax.set_ylim(y_lim_lower, y_lim_upper)
+                else: # we didi not take the absolute of evals
+                    y_lim_lower = np.percentile(evals,                    (100-percentile_to_plot)/2) - .2
+                    y_lim_upper = np.percentile(evals, percentile_to_plot+(100-percentile_to_plot)/2) + .2
+                    range_lim = y_lim_upper - y_lim_lower
+                    y_lim_lower -= range_lim * 0.02
+                    y_lim_upper += range_lim * 0.02
+                    ax.set_ylim((y_lim_lower, y_lim_upper))
 
             # reset color cycle
             ax.set_prop_cycle(None)
