@@ -6,18 +6,22 @@ from scipy.sparse import coo_array
 from scipy.sparse.linalg import eigs
 
 import matplotlib.pyplot as plt
-import seaborn as sns
+# import seaborn as sns
 
 from tqdm import tqdm
 
 
-# TODO: maybe I should change this function to handle soarse matrices in Scipy, as it has more features than Sparse Pytorch.
 def global_conv_matrix(conv, bias=None, img_shape=None, zero_padding=(0,0),
-                        sparse_matrix=True):
-    assert(img_shape and len(img_shape) == len(zero_padding))
+                        sparse_matrix=True, verbose=False):
+    """
+    Creates matrix representation of a 2D->2D convolution.
+    Note that this only handles one color-channel/feature as input, and one feature as output.
+    Assumes stride == 1.
+    """
+    assert(img_shape is not None and len(img_shape) == len(zero_padding))
     img_shape = np.array(img_shape)
     zero_padding = np.array(zero_padding)
-    if bias: print("Warning: So far we currently do nothing with passed bias terms.")
+    if bias and verbose: print("Warning: So far we currently do nothing with passed bias terms.")
 
     # this is the matrix that will represent the global convolution operation
     img_shape_padded = img_shape + 2*zero_padding
@@ -97,6 +101,69 @@ def global_conv_matrix(conv, bias=None, img_shape=None, zero_padding=(0,0),
         trans = coo_array((values, (x_indices, y_indices)), shape=(res_flattened_length, img_flattened_length))
 
     return trans
+
+
+def conv_matrix_from_pytorch_layer(layer, img_shape, out_feat_no, in_feat_no):
+    """
+    Helper fucntion to conv_matrix.
+    Creates matrix representation of 2D->2D convolution.
+    Only considers one input feature and one output feature.
+    """
+    assert layer.stride == (1,1), "stride != 1 is not implemented."
+
+    conv = layer.weight.detach()[out_feat_no, in_feat_no]
+    bias = layer.bias.detach().numpy()[0] if layer.bias is not None else None                  # TODO: we don't factor in biases so far.
+    padd = layer.padding
+
+    trans = global_conv_matrix(conv, bias,
+                                img_shape=img_shape,
+                                zero_padding=padd,
+                                sparse_matrix=True) # using a sparse matrix reduces the funciton runtime by many orders of magnitude
+
+    return trans
+
+
+def global_conv_matrix_from_pytorch_layer(layer, inp_shape, out_shape, out_feat_no=None, inp_feat_no=None):
+    """
+    Helper fucntion to global_conv_matrix.
+
+    """
+    assert len(inp_shape) == 3, "Invalid input shape."
+    assert len(out_shape) == 3, "Invalid output shape."
+
+    n_out_feats = layer.weight.shape[0]
+    n_inp_feats = layer.weight.shape[1]
+    assert n_inp_feats == inp_shape[0], "Input shape does not match passed layer."
+    
+    inp_img_shape = inp_shape[1:]
+    out_img_shape = out_shape[1:]
+
+    inp_feats = [inp_feat_no] if inp_feat_no is not None else np.arange(n_inp_feats)
+    out_feats = [out_feat_no] if out_feat_no is not None else np.arange(n_out_feats)
+
+    values, x_indices, y_indices = [], [], []
+
+    block_shape = (np.prod(out_img_shape), np.prod(inp_img_shape))
+    global_shape = (block_shape[0] * len(out_feats), block_shape[1] * len(inp_feats))
+    
+    for i, out_feat in enumerate(out_feats):
+        x_pivot = block_shape[0] * i
+        for j, inp_feat in enumerate(inp_feats):
+            y_pivot = block_shape[1] * j
+
+            # (x_pivot, y_pivot) is the positiion in the global conv matrix that this submatrix starts at (top left corner).
+            trans = conv_matrix_from_pytorch_layer(layer, inp_img_shape, out_feat, inp_feat)
+            assert trans.shape == block_shape, f"Costructed conv matrix has unexpected shape. {trans.shape} != {block_shape}"
+
+            values.append(trans.data)
+            x_indices.append(x_pivot + trans.row)
+            y_indices.append(y_pivot + trans.col)
+
+    global_trans = coo_array((np.array(values).flatten(), (np.array(x_indices).flatten(), np.array(y_indices).flatten())), shape=global_shape)
+
+    return global_trans
+
+
 
 
 # calculate surrogate model
