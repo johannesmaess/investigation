@@ -1,9 +1,12 @@
 from functools import partial
+
 import numpy as np
+from numpy.linalg import eig, svd
+
 import torch
 
 from scipy.sparse import coo_array
-from scipy.sparse.linalg import eigs
+from scipy.sparse.linalg import eigs, svds
 
 import matplotlib.pyplot as plt
 # import seaborn as sns
@@ -123,7 +126,7 @@ def conv_matrix_from_pytorch_layer(layer, img_shape, out_feat_no, in_feat_no):
     return trans
 
 
-def global_conv_matrix_from_pytorch_layer(layer, inp_shape, out_shape, out_feat_no=None, inp_feat_no=None):
+def global_conv_matrix_from_pytorch_layer(layer, inp_shape, out_shape, out_feat_no=None, inp_feat_no=None, force_square_matrix=False):
     """
     Helper fucntion to global_conv_matrix.
 
@@ -159,6 +162,11 @@ def global_conv_matrix_from_pytorch_layer(layer, inp_shape, out_shape, out_feat_
             x_indices.append(x_pivot + trans.row)
             y_indices.append(y_pivot + trans.col)
 
+    if force_square_matrix==True:
+        # pad the transition matrix with zero columns on the right, or zero rows on the bottom, to make it square
+        n = max(*global_shape)
+        global_shape = (n, n)
+
     global_trans = coo_array((np.array(values).flatten(), (np.array(x_indices).flatten(), np.array(y_indices).flatten())), shape=global_shape)
 
     return global_trans
@@ -174,7 +182,8 @@ def forw_surrogate_matrix(W, curr, gamma, checks=True, recover_activations=True,
         # apply one gamma parameter globally
         R_i_to_j = W + W * (W > 0) * gamma
     else: 
-        assert gamma >= 0 and gamma < 1, f"If smart_gamma_func is given, gamma ({gamma}) should be a scale parameter between 0 and 1."
+        if smart_gamma_func==smart_gamma_max_before_sign_flip:
+            assert gamma >= 0 and gamma < 1, f"If smart_gamma_func is smart_gamma_max_before_sign_flip, gamma ({gamma}) should be a scale parameter between 0 and 1."
 
         # obtain maximum valid gamma per per row of matrix by function. Then use the 'gamma' parameter (range 0 to 1) to scale up to these row-wise maxima.
         gamma_per_row = smart_gamma_func(W, curr)
@@ -207,16 +216,31 @@ def forw_surrogate_matrix(W, curr, gamma, checks=True, recover_activations=True,
     
     return R_i_to_j
 
-def back_matrix(W, curr, gamma, smart_gamma_func=None, log=False):
-    assert curr is not None, "Reference point needed for for backward matrix"
+def back_matrix(W, curr, gamma, smart_gamma_func=None, delete_unnecessary_rows=False, log=False):
+    """
+    Note: R_j_forwards is the activation of the forward surrogate model, which is equivalent to the normal NN's pre-ReLU activaiton z.
 
-    R_j_given_i = forw_surrogate_matrix(W, curr, gamma, checks=True, recover_activations=True, smart_gamma_func=smart_gamma_func)
+    Params:
+    delete_unnecessary_rows: If the output Relevancy R_j_forward < 0, then a_j = 0, then R_j_backwards = 0.
+    In using the back_matrix later, R_i_given_j will in these case always be multiplied by 0.
+    Setting delete_unnecessary_rows=True, recognizes thes rows in the matrix and sets their entries R_i_given_j=0, to simplify the matrix.
+    """
+
+    assert curr is not None, "Reference point needed for backward matrix"
+
+    R_j_given_i = forw_surrogate_matrix(W, curr, gamma, checks=True, recover_activations=False, smart_gamma_func=smart_gamma_func)
 
     R_j_and_i   = R_j_given_i * curr[None, :]
     R_i_and_j   = R_j_and_i.T
-    R_j         = R_i_and_j.sum(axis=0)
+    R_j         = R_i_and_j.sum(axis=0) # + 1e-9
+
+    if delete_unnecessary_rows: 
+        R_j[R_j <= 0] = np.inf
+        R_j[(W@curr) <= 0] = np.inf
+
     R_j.resize((1, R_j.shape[0]))
     R_i_given_j = R_i_and_j * (1 / R_j) # we multiply by the reciprocal, as direct division would turn coo_arrays into dense matrices
+
 
     if log:
         print('R_j_given_i\n', R_j_given_i)
@@ -225,34 +249,63 @@ def back_matrix(W, curr, gamma, smart_gamma_func=None, log=False):
         print('R_j\n', R_j)
         print('R_i_given_j\n', R_i_given_j)
 
+    R_i_given_j = prune_coo_array(R_i_given_j)
+
     return R_i_given_j
 
-def calc_evals(W, point, gammas, num_evals=None, return_evecs=False, mode="forw recover activations", smart_gamma_func=None, abs_evals=True):
+def back_joint_matrix(W, curr, gamma, R_j_backwards, **kwargs):
+    """
+    Calculates the "joint relevancy" between node j of the later layer and node i of the earlier layer.
+    Analogous to the joint probability, we achieve it by multiplying the conditional R_i_given_j with the prior R_j_backwards.
+    Note, that in our theroy we distinguish between R_j_forwards and R_j_backwards;
+    to emulate a computation step of the LRP method, this function required R_j_backwards as the prior.
+    """
+    R_i_given_j = back_matrix(W, curr, gamma, **kwargs)
     
+    assert R_j_backwards.shape == (1, R_i_given_j.shape[1])
+    # R_j_backwards.resize((1, R_j_backwards.shape[0]))
+    
+    R_i_and_j_backwards = R_i_given_j * R_j_backwards
+    return R_i_and_j_backwards
+
+def calc_evals(W, point, gammas, num_evals=None, return_evecs=False, return_matrices=False, mode="forw recover activations", output_layer_relevancies=None, smart_gamma_func=None, svd_mode=False, abs_evals=True):
+    assert svd_mode or W.shape[0] == W.shape[1], "Use svd_mode=True, when passing non-quadratic matrices."
+    assert (mode=="back joint") != (output_layer_relevancies is None), "output_layer_relevancies should be given iff. mode=='back joint'."
     if num_evals is None: num_evals = W.shape[0]
 
     matrix_func_dict = {
         "forw recover activations": partial(forw_surrogate_matrix, recover_activations=True), 
         "forw":                     partial(forw_surrogate_matrix, recover_activations=False), 
-        "back":                     back_matrix
+        "back":                     partial(back_matrix,           delete_unnecessary_rows=False),
+        "back clip":                partial(back_matrix,           delete_unnecessary_rows=True),
+        "back joint":               partial(back_joint_matrix,     R_j_backwards=output_layer_relevancies),
     }
     assert mode in matrix_func_dict, f'Mode "{mode}" not available'
     matrix_func = matrix_func_dict[mode]
 
-    forwards = [matrix_func(W, point, gamma, smart_gamma_func=smart_gamma_func) for gamma in gammas]
+    matrices = [matrix_func(W, point, gamma, smart_gamma_func=smart_gamma_func) for gamma in gammas]
+    if num_evals == "auto":
+        # this assumes that the maximum rank of all matrices is either the rank of the first of the last matrix
+        # and sets num_evals to the maximum guessed rank.
+        num_evals = max([np.linalg.matrix_rank(W.toarray() if type(W) is coo_array else W) for W in (matrices[0], matrices[-1])])
+
 
     evals, evecs = [], []
-    for M in tqdm(forwards):
-        if type(M) is np.ndarray:
-            vals, vecs = np.linalg.eig(M)
-        elif type(M) is coo_array:
-            if num_evals < M.shape[0]:
-                vals, vecs = eigs(M, k=num_evals)
+    for i, M in (enumerate(matrices)):
+        if type(M) is coo_array:
+            if num_evals==min(M.shape): 
+                # make matrix dense, to use numpy eig/svd
+                M = M.toarray()
             else:
-                # falls back to dense matrix eigendecomposition
-                vals, vecs = np.linalg.eig(M.toarray())
-        else:
-            assert False, f"matrix of type {type(M)} not supported."
+                if not svd_mode: vals, vecs    = eigs(M, k=num_evals, which="LM")
+                else:            vecs, vals, _ = svds(M, k=num_evals, which="LM")
+        if type(M) is np.ndarray:
+            if np.any(np.isnan(M)): 
+                print(i)
+                print(M)
+                return
+            if not svd_mode: vals, vecs    = eig(M)
+            else:            vecs, vals, _ = svd(M, full_matrices=False)
 
         evals.append(vals)
         if return_evecs:
@@ -273,49 +326,97 @@ def calc_evals(W, point, gammas, num_evals=None, return_evecs=False, mode="forw 
     x_index = x_index.astype(int)
     evals = evals[x_index, order]
 
-    if not return_evecs: 
-        return evals
+    return (evals,
+            evecs if return_evecs else None,
+            matrices if return_matrices else None)
 
-    evecs = evecs[x_index, order]
-    return evals, evecs
-
-def calc_evals_batch(weights_list, points_list, gammas=np.linspace(0,1,201)[:-1], num_evals=None, **kwargs): # kwargs can include 'mode', 'return_evecs' and 'smart_gamma_func'
-    return_evecs = kwargs['return_evecs'] if 'return_evecs' in kwargs else False
+def calc_evals_batch(weights_list, points_list, gammas=np.linspace(0,1,201)[:-1], **kwargs): # kwargs can include 'mode', 'return_evecs' and 'smart_gamma_func'
+    """
+    Wraps around calc_evals to make calls for multiple weights, and multiple reference points easier.
+    A bit unnecessary and overcomplex ba now tbh, might refactor later.
+    """
+    return_evecs =    kwargs['return_evecs']    if 'return_evecs'    in kwargs else False
+    return_matrices = kwargs['return_matrices'] if 'return_matrices' in kwargs else False
 
     ### preemptive checks ###
-    if not num_evals: # lower bound
-        num_evals = min([min(W.shape) for W in weights_list])
-    else: # upper bound
-        maxi = max([max(W.shape) for W in weights_list])
-        if maxi < num_evals:
-            print(f"Warn: too high number of evals requested ({num_evals}). We instead return {maxi}.")
-            num_evals = maxi
-
-    if (kwargs['mode'] in ["forw"]):
+    if 'forw' == kwargs['mode']:
         if (points_list is not None and type(points_list) is list and len(points_list) > 1):
             print("Note: For mode \"{mode}\" the matrix is not reference point dependent.\nFunction will only return one Eval set per weight matrix.")
         points_list = [None]
+
+    V = weights_list[0]
+    for W in weights_list: assert W.shape == V.shape, "Pass only matrices of same shape"
+
+    if 'num_evals' not in kwargs:
+        kwargs['num_evals'] = min(V.shape)
+        num_expected_evals  = min(V.shape)
+    elif kwargs['num_evals'] == 'auto':
+        num_expected_evals  = min(V.shape)
+    else: # check validity of passed param
+        assert kwargs['num_evals'] > 0 and kwargs['num_evals'] <= min(V.shape), "Invalid num_evals passed."
+        num_expected_evals = kwargs['num_evals']
+
+    vec_len = V.shape[0]
+    if 'back' in kwargs['mode'] and 'svd_mode' in kwargs and kwargs['svd_mode']:
+        vec_len = V.shape[1]
     
-    computed_evals = np.zeros((len(weights_list), len(points_list), len(gammas), num_evals))
-    if return_evecs:
-        computed_evecs = np.zeros((len(weights_list), len(points_list), len(gammas), num_evals, weights_list[0].shape[0]))
+    dtype=np.cfloat
+    if ('abs_evals' in kwargs and kwargs['abs_evals']) or ('svd_mode' in kwargs and kwargs['svd_mode']):
+        dtype=np.float
+
+    computed_evals =                  np.zeros((len(weights_list), len(points_list), len(gammas), num_expected_evals)         , dtype=dtype)
+    if return_evecs: computed_evecs = np.zeros((len(weights_list), len(points_list), len(gammas), num_expected_evals, vec_len), dtype=dtype)
+    if return_matrices: computed_matrices = []
 
     for i, W in enumerate(weights_list):
-        for j, point in enumerate(points_list):
-            ret = calc_evals(W, point, gammas, num_evals, **kwargs)
-            if return_evecs: 
-                computed_evals[i][j], computed_evecs[i][j] = ret
-            else: 
-                computed_evals[i][j] = ret
+        if return_matrices: computed_matrices.append([])
+        for j, point in tqdm(enumerate(points_list)):
+            # evals, evecs, matrices = 
+            evals, evecs, matrices = calc_evals(W, point, gammas, **kwargs)
+            computed_evals[i, j, :len(evals)] = evals
+            if return_evecs:    computed_evecs[i, j, :len(evecs)] = evecs
+            if return_matrices: computed_matrices[-1].append(matrices)
 
-    if return_evecs: 
-        return computed_evals, computed_evecs
-    return computed_evals
+    if dtype==np.cfloat:
+        # if none of the calculations returned imaginary parts, change dtype to real.
+        if np.any(np.imag(computed_evals)):
+            computed_evals = np.real(computed_evals)
+        if return_evecs and np.any(np.imag(computed_evecs)):
+            computed_evecs = np.real(computed_evecs)
+
+    return (computed_evals,
+            computed_evecs if return_evecs else None,
+            computed_matrices if return_matrices else None)
+
+def col_norms_for_matrices(comp_mats, ord=1):
+    """
+    Computes the column norms for every (spars/dense) matrix in a 2D list.
+    """
+    col_norms = np.zeros((len(comp_mats), len(comp_mats[0]), len(comp_mats[0][0]), comp_mats[0][0][0].shape[1]))
+
+    for i_weight, mats_for_weight in enumerate(comp_mats):
+        for i_point, mats_for_point in enumerate(mats_for_weight):
+            for i_gamma, mat in tqdm(enumerate(mats_for_point)):
+                if ord==1:
+                    # compute one norm of every column of the matrix
+                    norm = np.ones(mat.shape[0]) @ np.abs(mat)
+                elif ord==2:
+                    mat_squared = mat.copy()
+                    mat_squared.data = mat_squared.data**2
+                    norm = np.ones(mat.shape[0]) @ mat_squared
+                    norm = np.sqrt(norm)
+                else:
+                    assert False, "Unsupported ord."
+
+                col_norms[i_weight, i_point, i_gamma] = norm
+
+    return col_norms
 
 
 def plot_evals_lineplot(precomputed_evals, gammas=np.linspace(0,1,201)[:-1], 
-                num_evals=None, mark_positive_slope=False, percentile_to_plot=None, ylim=4, one_plot_per='weight',
-                yscale='linear', green_line_at_x=None):
+                num_evals=None, mark_positive_slope=False, percentile_to_plot=None, plot_only_non_zero=False, ylim=4, one_plot_per='weight',
+                ylabel="abs(complex eigenvalues)",
+                yscale='linear', xscale='linear', green_line_at_x=None):
     """
     Plots the evolution of Eigenvalues with increasing gammas in a lineplot.
     """
@@ -325,20 +426,20 @@ def plot_evals_lineplot(precomputed_evals, gammas=np.linspace(0,1,201)[:-1],
         precomputed_evals = precomputed_evals[:, :, :, :num_evals]
 
     n_ax_dict = {
-        'in total': 1,
-        'weight': precomputed_evals.shape[0],
-        'point': precomputed_evals.shape[0] * precomputed_evals.shape[1]
+        'in total': (1, 1),
+        'weight': (1, precomputed_evals.shape[0]),
+        'point': precomputed_evals.shape[:2]
     }
     assert one_plot_per in ['point', 'weight', 'in total']
     n_ax = n_ax_dict[one_plot_per]
 
     y_lim_lower = {'linear':0, 'log': .1}[yscale]
 
-    figsize = (5*n_ax, 3) if n_ax>1 else (20, 10)
-    fig, axs = plt.subplots(1, n_ax, figsize=figsize)
+    figsize = (20, 10) if n_ax==(1,1) else (5*n_ax[1], 3*n_ax[0])
+    fig, axs = plt.subplots(*n_ax, figsize=figsize)
     axs, ax_i, ax = np.array(axs).flatten(), -1, None
 
-    fig.suptitle('Evolution of abs(complex eigenvalues) with increasing $\gamma$' +
+    fig.suptitle(f'Evolution of {ylabel} with increasing $\gamma$' +
             ('\nFat bar below indicates section of positive derivative' if mark_positive_slope else ''))
 
     ### helper functions ###
@@ -350,14 +451,18 @@ def plot_evals_lineplot(precomputed_evals, gammas=np.linspace(0,1,201)[:-1],
 
         # plt.figure(figsize=(20,10))
         ax.set_xlabel('$\gamma$')
-        ax.set_ylabel('Eigenvalue')
-        ax.set_ylim((y_lim_lower, ylim))
+        ax.set_ylabel(ylabel)
+        if type(ylim) == int:
+            ax.set_ylim((y_lim_lower, ylim))
+        elif type(ylim) == tuple:
+            ax.set_ylim(ylim)
 
         if green_line_at_x is not None: ax.axvline(green_line_at_x, color="green")
         
     def ax_show():
         nonlocal ax
         ax.set_yscale(yscale)
+        ax.set_xscale(xscale)
         # ax.legend(loc='upper right')
 
     ### preemptive checks ###
@@ -374,7 +479,7 @@ def plot_evals_lineplot(precomputed_evals, gammas=np.linspace(0,1,201)[:-1],
                 if np.all(precomputed_evals >= 0):
                     y_lim_upper = np.percentile(evals, percentile_to_plot) + .2
                     ax.set_ylim(y_lim_lower, y_lim_upper)
-                else: # we didi not take the absolute of evals
+                else: # we did not take the absolute of evals
                     y_lim_lower = np.percentile(evals,                    (100-percentile_to_plot)/2) - .2
                     y_lim_upper = np.percentile(evals, percentile_to_plot+(100-percentile_to_plot)/2) + .2
                     range_lim = y_lim_upper - y_lim_lower
@@ -385,7 +490,13 @@ def plot_evals_lineplot(precomputed_evals, gammas=np.linspace(0,1,201)[:-1],
             # reset color cycle
             ax.set_prop_cycle(None)
             # plot for this point
+            if plot_only_non_zero:
+                mask = np.any(np.abs(evals) > 1e-5, axis=0)
+                evals = evals[:, mask]
+                # print(f"W: {i}, p: {j}. {1-mask.mean():.0%} of lines are constantly zero and don't get plotted. Remaining:", mask.sum())
+                ax.title.set_text(f"({i},{j}) {mask.sum()}/{np.prod(mask.shape)} lines are non-zero.")
             Y = evals + np.random.normal(0, .005, size=evals.shape[1])[None, :] # add some random noise, such that lines don't overlap.
+
             labels = [f'Exp. {i+1}, Point {j+1}, EV {k+1}' for k in range(evals.shape[1])]
             ax.plot(gammas, Y, label=labels)
 
@@ -403,6 +514,8 @@ def plot_evals_lineplot(precomputed_evals, gammas=np.linspace(0,1,201)[:-1],
             if one_plot_per=='point': ax_show()
         if one_plot_per=='weight': ax_show()
     if one_plot_per=='in total': ax_show()
+
+    plt.subplots_adjust(hspace=0.3)
 
 
 def eval_peak_distribution_plot(computed_evals, gammas, weights_lbls=None):
@@ -484,7 +597,7 @@ def sign_flip_distribution_plot(weights_list, points_list, weights_lbls, mode='b
     return peaks_per_weight
 
 
-def smart_gamma_func(W, curr, lower_bound=0, lower_bound_handling=0., upper_bound=100000, upper_bound_handling='clip', log=0):
+def smart_gamma_max_before_sign_flip(W, curr, lower_bound=0, lower_bound_handling=0., upper_bound=100000, upper_bound_handling='clip', log=0):
     """
     Returns a maximum suggested gamma parameter per row of the transition matrix W, given the current data point gamma. 
     """
@@ -508,3 +621,25 @@ def smart_gamma_func(W, curr, lower_bound=0, lower_bound_handling=0., upper_boun
     if log: print('->', gammas)
 
     return gammas
+
+
+def smart_gamma_wo_sign_flips(W, curr):
+    """
+    Three possible cases:
+    1. The normal result is negative. In this case the following ReLU makes the output neurons activation and thus relevancy 0.
+    2. The normal result = "positive" result. This means all incoming weights are positive.
+    3. 0 < normal_result < positive_result. This means some weights are negative. 
+
+    3. is the only case that interests us, and where the gamma rule will have any effect.
+    """
+    normal_res =    W          @ curr
+    positive_res = (W * (W>0)) @ curr
+    
+    mask = np.zeros_like(normal_res)
+    mask[np.logical_and(0 < normal_res, normal_res < positive_res)] = 1
+
+    return mask
+
+def prune_coo_array(mat):
+    mask = (mat.data != 0)
+    return coo_array((mat.data[mask], (mat.row[mask], mat.col[mask])))

@@ -9,6 +9,10 @@ from util.util_gamma_rule import \
     forw_surrogate_matrix
 
 
+"""
+Note: The original Gamma per Neuron idea didn't work: the things it filtered out to stay 'safe' were the only output neurons that mattered in the Gamma rule.
+"""
+
 class GammaPerNeuronLayer():
     """
     Helper layer for LRP forward hook implementation.
@@ -36,12 +40,12 @@ class GammaPerNeuronLayer():
         # calculate gammas, for which the output neurons activation would change its sign
         gamma = (- normal_layer_result / positive_layer_result).detach()
         # bound them
-        gamma = gamma.clamp(min=0, max=10000)
+        gamma = gamma.clamp(min=0)
         
         if self.diffusion > 0:
             gamma = self.diffusion * gamma.mean() + (1-self.diffusion) * gamma
 
-        combined_result = normal_layer_result + self.gamma_scale * gamma * positive_layer_result
+        combined_result = normal_layer_result + self.gamma_scale * gamma * positive_layer_result * 1.5
 
         return combined_result
 
@@ -52,7 +56,7 @@ class GammaWoSignFlipsLayer():
     Modifies forward pass with a variation of the LRP-gamma rule:
     Apply the gamma rule, to every neuron, except to those whose output would change its sign.
     """
-    def __init__(self, conv_layer, gamma=0.):
+    def __init__(self, conv_layer, gamma):
         self.gamma = gamma
 
         # save the normal conv layer
@@ -65,31 +69,38 @@ class GammaWoSignFlipsLayer():
 
     def forward(self, x):
         positive_layer_result = self.positive_layer.forward(x)
-        normal_layer_result =     self.normal_layer.forward(x)
+        normal_layer_result   =   self.normal_layer.forward(x)
 
         # calculate if the gamma rule causes a sign flip
-        no_flip = (torch.sign(normal_layer_result) == torch.sign(normal_layer_result + positive_layer_result)).detach()
+        mask = torch.zeros(normal_layer_result.shape).requires_grad_(False)
+        mask[torch.logical_and(0 < normal_layer_result, normal_layer_result < positive_layer_result)] = 1
 
-        print("fraction sign flips:", torch.logical_not(no_flip).sum() / np.prod(no_flip.shape))
+        print("fraction of relevant gammas:", torch.logical_not(mask).sum() / np.prod(mask.shape))
 
-        # apply LRP-gamma where no flips occur. Apply LRP-0 where flips occur
-        return normal_layer_result + positive_layer_result * no_flip
+        # apply LRP-gamma where no flips can occur. Apply LRP-0 where flips occur
+        return normal_layer_result + positive_layer_result * mask * self.gamma
 
+
+
+# helpers
 
 def coo_scipy_to_torch(mat):
     return torch.sparse_coo_tensor(np.stack((mat.row, mat.col)), mat.data, size=mat.shape)
 
 class Mode(Enum):
-    NORMAL = 1
+    ZERO = 1
     GAMMA = 2
     GAMMA_PER_NEURON = 3
 
 class Conv2dAsMatrixLayer():
+    """
+    A class (a pytorch "layer") that can represent the forward pass of a number of different LRP rules forward passes as a matrix operation.
+    """
     def __init__(self, conv_layer, inp_shape, out_shape, bias=True):
         assert len(inp_shape) == 3, "Pass inp_shape as (in_channels, img_height, img_width). No batch dimension."
         assert len(out_shape) == 3, "Pass out_shape as (out_channels, img_height, img_width). No batch dimension."
 
-        self.mode = Mode.NORMAL
+        self.mode = Mode.ZERO
         self.inp_shape = inp_shape
         self.out_shape = out_shape
         
@@ -98,21 +109,24 @@ class Conv2dAsMatrixLayer():
             self.bias_org = copy.deepcopy(conv_layer.bias.data)
 
         self.trans_org = global_conv_matrix_from_pytorch_layer(conv_layer, inp_shape, out_shape)
-
         self.reset()
 
+    ### Setting up the layer to work according to a specific Gamma rule, by modyfing the transition matrix. ###
     def reset(self):
-        self.mode = Mode.NORMAL
+        # Reset to LRP-0
+        self.mode = Mode.ZERO
         self.trans = coo_scipy_to_torch(self.trans_org)
         self.bias = copy.deepcopy(self.bias_org)
 
     def set_gamma(self, gamma):
+        # Set to LRP-gamma
         self.mode = Mode.GAMMA
         mat = forw_surrogate_matrix(self.trans_org, curr=None, gamma=gamma, checks=False, recover_activations=False)
         self.trans = coo_scipy_to_torch(mat.tocoo()) # mat is csr format, hence we need another conversion (dont know why csr)
         self.bias = self.bias_org + gamma * self.bias_org.clamp(min=0)
 
     def set_gamma_per_neuron(self, gamma_scale):
+        # Set to LRP-gamma (unfortunatley I found out that this rule is equivalent to LRP-0)
         self.mode = Mode.GAMMA_PER_NEURON
         self.gamma_scale = gamma_scale
         self.reset()
@@ -121,7 +135,7 @@ class Conv2dAsMatrixLayer():
         self.bias_pos = self.bias.clamp(min=0) if self.bias is not None else None
 
     def forward_one(self, x):
-        if self.mode in (Mode.NORMAL, Mode.GAMMA):
+        if self.mode in (Mode.ZERO, Mode.GAMMA):
             return (self.trans @ x.view(-1)).reshape(self.out_shape) + (self.bias[:, None, None] if self.bias is not None else 0)
 
         if self.mode in (Mode.GAMMA_PER_NEURON):
