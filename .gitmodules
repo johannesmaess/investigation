@@ -1,6 +1,3 @@
 [submodule "paper_gnn_lrp"]
 	path = paper_gnn_lrp
 	url = git@git.tu-berlin.de:thomas_schnake/paper_gnn_lrp.git
-[submodule "zennit"]
-	path = zennit
-	url = git@github.com:johannesmaess/zennit.git
