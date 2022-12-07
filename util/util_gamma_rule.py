@@ -106,7 +106,7 @@ def global_conv_matrix(conv, bias=None, img_shape=None, zero_padding=(0,0),
     return trans
 
 
-def conv_matrix_from_pytorch_layer(layer, img_shape, out_feat_no, in_feat_no):
+def conv_matrix_from_pytorch_layer(layer, img_shape, in_feat_no, out_feat_no):
     """
     Helper fucntion to conv_matrix.
     Creates matrix representation of 2D->2D convolution.
@@ -126,7 +126,7 @@ def conv_matrix_from_pytorch_layer(layer, img_shape, out_feat_no, in_feat_no):
     return trans
 
 
-def global_conv_matrix_from_pytorch_layer(layer, inp_shape, out_shape, out_feat_no=None, inp_feat_no=None, force_square_matrix=False):
+def global_conv_matrix_from_pytorch_layer(layer, inp_shape, out_shape, inp_feats=None, out_feats=None, force_square_matrix=False, load_bar=False):
     """
     Helper fucntion to global_conv_matrix.
 
@@ -141,33 +141,45 @@ def global_conv_matrix_from_pytorch_layer(layer, inp_shape, out_shape, out_feat_
     inp_img_shape = inp_shape[1:]
     out_img_shape = out_shape[1:]
 
-    inp_feats = [inp_feat_no] if inp_feat_no is not None else np.arange(n_inp_feats)
-    out_feats = [out_feat_no] if out_feat_no is not None else np.arange(n_out_feats)
+    # if not one specific output feature / filter is selected, create matrix for all of them.
+    if inp_feats is None: inp_feats = np.arange(n_inp_feats)
+    if out_feats is None: out_feats = np.arange(n_out_feats)
 
-    values, x_indices, y_indices = [], [], []
 
     block_shape = (np.prod(out_img_shape), np.prod(inp_img_shape))
     global_shape = (block_shape[0] * len(out_feats), block_shape[1] * len(inp_feats))
-    
-    for i, out_feat in enumerate(out_feats):
+
+    load_func = lambda x: x
+    if load_bar==True:
+        load_func = tqdm 
+        print(len(out_feats), 'feats to iterate')
+    for i, out_feat in load_func(enumerate(out_feats)):
         x_pivot = block_shape[0] * i
         for j, inp_feat in enumerate(inp_feats):
             y_pivot = block_shape[1] * j
 
             # (x_pivot, y_pivot) is the positiion in the global conv matrix that this submatrix starts at (top left corner).
-            trans = conv_matrix_from_pytorch_layer(layer, inp_img_shape, out_feat, inp_feat)
+            trans = conv_matrix_from_pytorch_layer(layer, inp_img_shape, inp_feat, out_feat)
             assert trans.shape == block_shape, f"Costructed conv matrix has unexpected shape. {trans.shape} != {block_shape}"
 
-            values.append(trans.data)
-            x_indices.append(x_pivot + trans.row)
-            y_indices.append(y_pivot + trans.col)
+            # write entries to global matrix stores
+            if (i,j) == (0,0):
+                entries_per_submatrix = len(trans.data)
+                entries_total = entries_per_submatrix * len(out_feats) * len(inp_feats)
+                values, x_indices, y_indices = np.zeros(entries_total), np.zeros(entries_total), np.zeros(entries_total)
+            
+            store_pivot = (i*len(inp_feats) + j) * entries_per_submatrix
+            for inp, target in zip((trans.data, trans.row + x_pivot, trans.col + y_pivot), (values, x_indices, y_indices)):
+                assert len(inp) == entries_per_submatrix 
+                target[store_pivot:store_pivot+entries_per_submatrix] = inp
+
 
     if force_square_matrix==True:
         # pad the transition matrix with zero columns on the right, or zero rows on the bottom, to make it square
         n = max(*global_shape)
         global_shape = (n, n)
 
-    global_trans = coo_array((np.array(values).flatten(), (np.array(x_indices).flatten(), np.array(y_indices).flatten())), shape=global_shape)
+    global_trans = coo_array((values, (x_indices, y_indices)), shape=global_shape)
 
     return global_trans
 
@@ -218,7 +230,7 @@ def forw_surrogate_matrix(W, curr, gamma, checks=True, recover_activations=True,
 
 def back_matrix(W, curr, gamma, smart_gamma_func=None, delete_unnecessary_rows=False, log=False):
     """
-    Note: R_j_forwards is the activation of the forward surrogate model, which is equivalent to the normal NN's pre-ReLU activaiton z.
+    Note: R_j_forwards is the activation of the forward surrogate model, which is equivalent to the normal NN's pre-ReLU activation z.
 
     Params:
     delete_unnecessary_rows: If the output Relevancy R_j_forward < 0, then a_j = 0, then R_j_backwards = 0.
@@ -297,8 +309,10 @@ def calc_evals(W, point, gammas, num_evals=None, return_evecs=False, return_matr
                 # make matrix dense, to use numpy eig/svd
                 M = M.toarray()
             else:
-                if not svd_mode: vals, vecs    = eigs(M, k=num_evals, which="LM")
-                else:            vecs, vals, _ = svds(M, k=num_evals, which="LM")
+                if not svd_mode:     vals, vecs    = eigs(M, k=num_evals, which="LM")
+                else:            
+                    if return_evecs: vecs, vals, _ = svds(M, k=num_evals, which="LM", return_singular_vectors='u')
+                    else:                  vals    = svds(M, k=num_evals, which="LM", return_singular_vectors=False)
         if type(M) is np.ndarray:
             if np.any(np.isnan(M)): 
                 print(i)
@@ -341,28 +355,29 @@ def calc_evals_batch(weights_list, points_list, gammas=np.linspace(0,1,201)[:-1]
     ### preemptive checks ###
     if 'forw' == kwargs['mode']:
         if (points_list is not None and type(points_list) is list and len(points_list) > 1):
-            print("Note: For mode \"{mode}\" the matrix is not reference point dependent.\nFunction will only return one Eval set per weight matrix.")
+            print(f"Note: For mode \"{mode}\" the matrix is not reference point dependent.\nFunction will only return one Eval set per weight matrix.")
         points_list = [None]
 
-    V = weights_list[0]
-    for W in weights_list: assert W.shape == V.shape, "Pass only matrices of same shape"
+    if ('abs_evals' in kwargs and kwargs['abs_evals']) or ('svd_mode' in kwargs and kwargs['svd_mode']): dtype=np.float
+    else:                                                                                                dtype=np.cfloat
+
+    if return_evecs:
+        V = weights_list[0]
+        for W in weights_list: assert W.shape == V.shape, "Pass only matrices of same shape"
+        if 'back' in kwargs['mode'] and 'svd_mode' in kwargs and kwargs['svd_mode']: vec_len = V.shape[1] # for non-square matrices, the svd length differs for the 'backward' matrix.
+        else:                                                                        vec_len = V.shape[0]
+        min_matrix_length = V.shape
+    else:
+        min_matrix_length = min([min(W.shape) for W in weights_list])
 
     if 'num_evals' not in kwargs:
-        kwargs['num_evals'] = min(V.shape)
-        num_expected_evals  = min(V.shape)
+        kwargs['num_evals'] = min_matrix_length
+        num_expected_evals  = min_matrix_length
     elif kwargs['num_evals'] == 'auto':
-        num_expected_evals  = min(V.shape)
+        num_expected_evals  = min_matrix_length
     else: # check validity of passed param
-        assert kwargs['num_evals'] > 0 and kwargs['num_evals'] <= min(V.shape), "Invalid num_evals passed."
+        assert kwargs['num_evals'] > 0 and kwargs['num_evals'] <= min_matrix_length, "Invalid num_evals passed."
         num_expected_evals = kwargs['num_evals']
-
-    vec_len = V.shape[0]
-    if 'back' in kwargs['mode'] and 'svd_mode' in kwargs and kwargs['svd_mode']:
-        vec_len = V.shape[1]
-    
-    dtype=np.cfloat
-    if ('abs_evals' in kwargs and kwargs['abs_evals']) or ('svd_mode' in kwargs and kwargs['svd_mode']):
-        dtype=np.float
 
     computed_evals =                  np.zeros((len(weights_list), len(points_list), len(gammas), num_expected_evals)         , dtype=dtype)
     if return_evecs: computed_evecs = np.zeros((len(weights_list), len(points_list), len(gammas), num_expected_evals, vec_len), dtype=dtype)
@@ -640,6 +655,6 @@ def smart_gamma_wo_sign_flips(W, curr):
 
     return mask
 
-def prune_coo_array(mat):
-    mask = (mat.data != 0)
-    return coo_array((mat.data[mask], (mat.row[mask], mat.col[mask])))
+def prune_coo_array(mat, atol=0):
+    mask = (np.abs(mat.data) > atol)
+    return coo_array((mat.data[mask], (mat.row[mask], mat.col[mask])), shape=mat.shape)
