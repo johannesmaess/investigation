@@ -349,6 +349,8 @@ def calc_evals_batch(weights_list, points_list, gammas=np.linspace(0,1,201)[:-1]
     Wraps around calc_evals to make calls for multiple weights, and multiple reference points easier.
     A bit unnecessary and overcomplex ba now tbh, might refactor later.
     """
+    if type(gammas) is list: gammas = [1e8 if g=='inf' else g for g in gammas]
+
     return_evecs =    kwargs['return_evecs']    if 'return_evecs'    in kwargs else False
     return_matrices = kwargs['return_matrices'] if 'return_matrices' in kwargs else False
 
@@ -366,7 +368,7 @@ def calc_evals_batch(weights_list, points_list, gammas=np.linspace(0,1,201)[:-1]
         for W in weights_list: assert W.shape == V.shape, "Pass only matrices of same shape"
         if 'back' in kwargs['mode'] and 'svd_mode' in kwargs and kwargs['svd_mode']: vec_len = V.shape[1] # for non-square matrices, the svd length differs for the 'backward' matrix.
         else:                                                                        vec_len = V.shape[0]
-        min_matrix_length = V.shape
+        min_matrix_length = min(V.shape)
     else:
         min_matrix_length = min([min(W.shape) for W in weights_list])
 
@@ -376,6 +378,7 @@ def calc_evals_batch(weights_list, points_list, gammas=np.linspace(0,1,201)[:-1]
     elif kwargs['num_evals'] == 'auto':
         num_expected_evals  = min_matrix_length
     else: # check validity of passed param
+        print(min_matrix_length)
         assert kwargs['num_evals'] > 0 and kwargs['num_evals'] <= min_matrix_length, "Invalid num_evals passed."
         num_expected_evals = kwargs['num_evals']
 
@@ -401,7 +404,7 @@ def calc_evals_batch(weights_list, points_list, gammas=np.linspace(0,1,201)[:-1]
 
     return (computed_evals,
             computed_evecs if return_evecs else None,
-            computed_matrices if return_matrices else None)
+            np.array(computed_matrices) if return_matrices else None)
 
 def col_norms_for_matrices(comp_mats, ord=1):
     """
@@ -430,7 +433,7 @@ def col_norms_for_matrices(comp_mats, ord=1):
 
 def plot_evals_lineplot(precomputed_evals, gammas=np.linspace(0,1,201)[:-1], 
                 num_evals=None, mark_positive_slope=False, percentile_to_plot=None, plot_only_non_zero=False, ylim=4, one_plot_per='weight',
-                ylabel="abs(complex eigenvalues)",
+                ylabel="Singular values",
                 yscale='linear', xscale='linear', green_line_at_x=None):
     """
     Plots the evolution of Eigenvalues with increasing gammas in a lineplot.
@@ -473,11 +476,12 @@ def plot_evals_lineplot(precomputed_evals, gammas=np.linspace(0,1,201)[:-1],
             ax.set_ylim(ylim)
 
         if green_line_at_x is not None: ax.axvline(green_line_at_x, color="green")
+
+        ax.set_xscale(xscale)
+        ax.set_yscale(yscale)
         
     def ax_show():
         nonlocal ax
-        ax.set_yscale(yscale)
-        ax.set_xscale(xscale)
         # ax.legend(loc='upper right')
 
     ### preemptive checks ###
@@ -513,7 +517,15 @@ def plot_evals_lineplot(precomputed_evals, gammas=np.linspace(0,1,201)[:-1],
             Y = evals + np.random.normal(0, .005, size=evals.shape[1])[None, :] # add some random noise, such that lines don't overlap.
 
             labels = [f'Exp. {i+1}, Point {j+1}, EV {k+1}' for k in range(evals.shape[1])]
-            ax.plot(gammas, Y, label=labels)
+            
+            # If gammas are numerical, use them to determine x position of lines. If they are strings, plot evals in equal spacing, and label them with the 'gammas'
+            if np.any([type(g) is str for g in gammas]):
+                xticks = np.arange(len(gammas))
+                ax.set_xticks(xticks)
+                ax.set_xticklabels(gammas)
+                ax.plot(xticks, Y, label=labels)
+            else:
+                ax.plot(gammas, Y, label=labels)
 
             if mark_positive_slope: # plot a scatter dot if the series values is increasing
                 # calc sign of derivative
@@ -531,6 +543,7 @@ def plot_evals_lineplot(precomputed_evals, gammas=np.linspace(0,1,201)[:-1],
     if one_plot_per=='in total': ax_show()
 
     plt.subplots_adjust(hspace=0.3)
+    plt.show()
 
 
 def eval_peak_distribution_plot(computed_evals, gammas, weights_lbls=None):

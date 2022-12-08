@@ -38,7 +38,7 @@ def distribution_histogram(comp_vals, bins = [0, 1e-5, 1e-4, 1e-3, 1e-2, .1, 1, 
 
     for data_for_weight in comp_vals:
         num_points, num_gamma, _ = data_for_weight.shape
-        fig, axs = plt.subplots(num_gamma, num_points, figsize=(10*num_points, 4*num_gamma))
+        fig, axs = plt.subplots(num_gamma, num_points, figsize=(10*num_points, 4*num_gamma), sharey=True)
         axs = np.array(axs).reshape((num_gamma, num_points))
 
         for i_point, data_for_point in enumerate(data_for_weight):
@@ -51,14 +51,19 @@ def distribution_histogram(comp_vals, bins = [0, 1e-5, 1e-4, 1e-3, 1e-2, .1, 1, 
                 (counts, bins) = np.histogram(data_for_gamma, bins=bins)
                 ax = axs[i_gamma, i_point]
 
-                x = np.arange(len(counts))
-                bar_lbls = [f"$ < \sigma <$ {bins[i+1]:.1e}".replace('.0e', 'e').replace('e+00', '').replace('e+0', 'e+').replace('e-0', 'e-') for i in range(len(bins)-1)]
+                def pretty(num):
+                    if 0.01 < num <= 100: return f"{num:.3f}".rstrip('0').rstrip('.')                                       # floating
+                    return f"{num:.1e}".replace('.0e', 'e').replace('e+00', '').replace('e+0', 'e+').replace('e-0', 'e-')   # scientific
+                bar_lbls = ["$ < \sigma \leq$ " + pretty(bins[i+1]) for i in range(len(bins)-1)]
 
+                x = np.arange(len(counts))
                 ax.set_xticks(x, bar_lbls)
                 ax.bar(x, counts)
                 # ax.plot(x, counts)
+
+                ax.title.set_text(f'Mean: {data_for_gamma.mean():.1f}, 95th Perc: {np.percentile(data_for_gamma, 95).round(1)}, Stdv: {data_for_gamma.std():.1f}')
                 
-        plt.suptitle(f"Distribution of Singular values.\nFor {len(axs[0])} data points (columns) and {len(axs)} gammas (rows).", fontsize=30)
+        plt.suptitle(f"Distribution of {len(data_for_gamma)} non-zero Singular values.\nFor {len(axs[0])} data points (columns) and {len(axs)} gammas (rows).", fontsize=30)
         plt.show()
 
 
