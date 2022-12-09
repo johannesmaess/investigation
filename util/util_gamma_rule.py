@@ -280,10 +280,13 @@ def back_joint_matrix(W, curr, gamma, R_j_backwards, **kwargs):
     R_i_and_j_backwards = R_i_given_j * R_j_backwards
     return R_i_and_j_backwards
 
-def calc_evals(W, point, gammas, num_evals=None, return_evecs=False, return_matrices=False, mode="forw recover activations", output_layer_relevancies=None, smart_gamma_func=None, svd_mode=False, abs_evals=True):
-    assert svd_mode or W.shape[0] == W.shape[1], "Use svd_mode=True, when passing non-quadratic matrices."
+def calc_mats(M, point, gammas, mode, output_layer_relevancies=None, smart_gamma_func=None):
+    """
+    For one forward transition matrix (representing a transition in a NN),
+    and a set of gammas, compute an associated LRP matrix.
+    """
+    if type(gammas) is list: gammas = [1e8 if g=='inf' else g for g in gammas]
     assert (mode=="back joint") != (output_layer_relevancies is None), "output_layer_relevancies should be given iff. mode=='back joint'."
-    if num_evals is None: num_evals = W.shape[0]
 
     matrix_func_dict = {
         "forw recover activations": partial(forw_surrogate_matrix, recover_activations=True), 
@@ -295,116 +298,107 @@ def calc_evals(W, point, gammas, num_evals=None, return_evecs=False, return_matr
     assert mode in matrix_func_dict, f'Mode "{mode}" not available'
     matrix_func = matrix_func_dict[mode]
 
-    matrices = [matrix_func(W, point, gamma, smart_gamma_func=smart_gamma_func) for gamma in gammas]
-    if num_evals == "auto":
-        # this assumes that the maximum rank of all matrices is either the rank of the first of the last matrix
-        # and sets num_evals to the maximum guessed rank.
-        num_evals = max([np.linalg.matrix_rank(W.toarray() if type(W) is coo_array else W) for W in (matrices[0], matrices[-1])])
+    matrices = [matrix_func(M, point, gamma, smart_gamma_func=smart_gamma_func) for gamma in gammas]
+    return matrices
 
 
-    evals, evecs = [], []
-    for i, M in (enumerate(matrices)):
-        if type(M) is coo_array:
-            if num_evals==min(M.shape): 
-                # make matrix dense, to use numpy eig/svd
-                M = M.toarray()
+def calc_mats_batch(weights_list, points_list, **kwargs):
+    """
+    Wrapper for calc_mats, to execute it quickly on multiple weights and reference points.
+    """
+    return np.array([[calc_mats(W, point, **kwargs) for point in points_list] for W in weights_list])
+
+def calc_vals(M, num_vals, return_vecs=False, svd_mode=True, abs_vals=False):
+    """
+    For a given matrix, calculate its eigen or singular-value decomposition and return it sorted by the values magnitudes.
+    """
+    if type(M) is coo_array:
+        if num_vals==min(M.shape): 
+            # make matrix dense, to use numpy eig/svd
+            M = M.toarray()
+        else:
+            if not svd_mode:     vals, vecs    = eigs(M, k=num_vals, which="LM")
+            else:            
+                if return_vecs: vecs, vals, _ = svds(M, k=num_vals, which="LM", return_singular_vectors='u')
+                else:                  vals    = svds(M, k=num_vals, which="LM", return_singular_vectors=False)
+    if type(M) is np.ndarray:
+        if np.any(np.isnan(M)): 
+            print(i)
+            print(M)
+            return
+        if not svd_mode: vals, vecs    = eig(M)
+        else:            vecs, vals, _ = svd(M, full_matrices=False)
+
+    vals = np.array(vals)
+    if abs_vals: vals = np.abs(vals)
+
+    # determine order by magnitude, for the num_vals largest vals
+    order = np.argsort(-np.abs(vals), axis=0)[:num_vals]
+
+    # return sorted vals and vecs
+    return (vals[order], np.array(vecs).T[order] if return_vecs else None)
+
+def calc_vals_batch(matrices, num_vals='auto', return_vecs=False, svd_mode=True, abs_vals=False):
+    """
+    Wraps around calc_evals to make calls for multiple weights, and multiple reference points.
+    Mostly useful for determining an efficient number of vals to compute per matrix, putting the results into uniform arrays, and its checks.
+    """
+    n_weights, n_points, n_gammas = matrices.shape[:3]
+    assert len(matrices[0, 0, 0].shape) == 2, "'matrices' should contain 2D arrays (np.ndarray or scipy.coo_array), nested in a 2D structure"
+
+    if abs_vals or svd_mode: dtype=np.float
+    else:                    dtype=np.cfloat
+
+    # if return_evcs==True, we want all matrices to be of the same size
+    if return_vecs: 
+        vec_len = matrices[0, 0, 0].shape[0]
+        for i, matrices_per_weight in enumerate(matrices):
+            for j, matrices_per_point in tqdm(enumerate(matrices_per_weight)):
+                for k, matrix_per_gamma in enumerate(matrices_per_point):
+                    assert matrix_per_gamma.shape == matrices[0,0,0].shape, "Pass only matrices of same shape"
+
+    # calculate upper bound for rank of matrix
+    max_rank_per_matrix = np.zeros((n_weights, n_points), dtype=int)
+    for i, matrices_per_weight in enumerate(matrices):
+        for j, matrices_per_point in enumerate(matrices_per_weight):
+            W = matrices_per_point[0]
+            if isinstance(W, coo_array):
+                max_rank_per_matrix[i,j] = min([len(np.unique(W.row)), len(np.unique(W.col))])
             else:
-                if not svd_mode:     vals, vecs    = eigs(M, k=num_evals, which="LM")
-                else:            
-                    if return_evecs: vecs, vals, _ = svds(M, k=num_evals, which="LM", return_singular_vectors='u')
-                    else:                  vals    = svds(M, k=num_evals, which="LM", return_singular_vectors=False)
-        if type(M) is np.ndarray:
-            if np.any(np.isnan(M)): 
-                print(i)
-                print(M)
-                return
-            if not svd_mode: vals, vecs    = eig(M)
-            else:            vecs, vals, _ = svd(M, full_matrices=False)
+                max_rank_per_matrix[i,j] = min([np.sum(np.any(W, axis=0)), np.sum(np.any(W, axis=1))])
 
-        evals.append(vals)
-        if return_evecs:
-            evecs.append(vecs.T)
+    # valculate the number of vals to be requested per matrix
+    vals_per_matrix = max_rank_per_matrix if num_vals=='auto' else np.clip(max_rank_per_matrix, a_min=None, a_max=num_vals)
 
-    evals = np.array(evals)
-    if return_evecs:
-        evecs = np.array(evecs)
+    # initialize stores
+    computed_evals =                 np.zeros((n_weights, n_points, n_gammas, vals_per_matrix.max())         , dtype=dtype)
+    if return_vecs: computed_evecs = np.zeros((n_weights, n_points, n_gammas, vals_per_matrix.max(), vec_len), dtype=dtype)
 
-    # sort by ascending abs(eigenvalues)
-    if abs_evals: evals = np.abs(evals)
-    order = np.argsort(-np.abs(evals), axis=1)
-
-    if num_evals and num_evals < evals.shape[1]:
-        order = order[:, :num_evals]
-
-    x_index = np.ones(order.shape[1]) * np.arange(order.shape[0])[:, None]
-    x_index = x_index.astype(int)
-    evals = evals[x_index, order]
-
-    return (evals,
-            evecs if return_evecs else None,
-            matrices if return_matrices else None)
-
-def calc_evals_batch(weights_list, points_list, gammas=np.linspace(0,1,201)[:-1], **kwargs): # kwargs can include 'mode', 'return_evecs' and 'smart_gamma_func'
-    """
-    Wraps around calc_evals to make calls for multiple weights, and multiple reference points easier.
-    A bit unnecessary and overcomplex ba now tbh, might refactor later.
-    """
-    if type(gammas) is list: gammas = [1e8 if g=='inf' else g for g in gammas]
-
-    return_evecs =    kwargs['return_evecs']    if 'return_evecs'    in kwargs else False
-    return_matrices = kwargs['return_matrices'] if 'return_matrices' in kwargs else False
-
-    ### preemptive checks ###
-    if 'forw' == kwargs['mode']:
-        if (points_list is not None and type(points_list) is list and len(points_list) > 1):
-            print(f"Note: For mode \"{mode}\" the matrix is not reference point dependent.\nFunction will only return one Eval set per weight matrix.")
-        points_list = [None]
-
-    if ('abs_evals' in kwargs and kwargs['abs_evals']) or ('svd_mode' in kwargs and kwargs['svd_mode']): dtype=np.float
-    else:                                                                                                dtype=np.cfloat
-
-    if return_evecs:
-        V = weights_list[0]
-        for W in weights_list: assert W.shape == V.shape, "Pass only matrices of same shape"
-        if 'back' in kwargs['mode'] and 'svd_mode' in kwargs and kwargs['svd_mode']: vec_len = V.shape[1] # for non-square matrices, the svd length differs for the 'backward' matrix.
-        else:                                                                        vec_len = V.shape[0]
-        min_matrix_length = min(V.shape)
-    else:
-        min_matrix_length = min([min(W.shape) for W in weights_list])
-
-    if 'num_evals' not in kwargs:
-        kwargs['num_evals'] = min_matrix_length
-        num_expected_evals  = min_matrix_length
-    elif kwargs['num_evals'] == 'auto':
-        num_expected_evals  = min_matrix_length
-    else: # check validity of passed param
-        print(min_matrix_length)
-        assert kwargs['num_evals'] > 0 and kwargs['num_evals'] <= min_matrix_length, "Invalid num_evals passed."
-        num_expected_evals = kwargs['num_evals']
-
-    computed_evals =                  np.zeros((len(weights_list), len(points_list), len(gammas), num_expected_evals)         , dtype=dtype)
-    if return_evecs: computed_evecs = np.zeros((len(weights_list), len(points_list), len(gammas), num_expected_evals, vec_len), dtype=dtype)
-    if return_matrices: computed_matrices = []
-
-    for i, W in enumerate(weights_list):
-        if return_matrices: computed_matrices.append([])
-        for j, point in tqdm(enumerate(points_list)):
-            # evals, evecs, matrices = 
-            evals, evecs, matrices = calc_evals(W, point, gammas, **kwargs)
-            computed_evals[i, j, :len(evals)] = evals
-            if return_evecs:    computed_evecs[i, j, :len(evecs)] = evecs
-            if return_matrices: computed_matrices[-1].append(matrices)
+    # calculate decomposition
+    for i, matrices_per_weight in enumerate(matrices):
+        for j, matrices_per_point in tqdm(enumerate(matrices_per_weight)):
+            for k, matrix_per_gamma in enumerate(matrices_per_point):
+                evals, evecs = calc_vals(matrix_per_gamma, num_vals=vals_per_matrix[i,j], return_vecs=return_vecs)
+                computed_evals[i, j, k, :len(evals)] = evals
+                if return_vecs: computed_evecs[i, j, k, :len(evecs)] = evecs
 
     if dtype==np.cfloat:
         # if none of the calculations returned imaginary parts, change dtype to real.
-        if np.any(np.imag(computed_evals)):
+        if not np.any(np.imag(computed_evals)):
             computed_evals = np.real(computed_evals)
-        if return_evecs and np.any(np.imag(computed_evecs)):
+        if return_vecs and not np.any(np.imag(computed_evecs)):
             computed_evecs = np.real(computed_evecs)
 
-    return (computed_evals,
-            computed_evecs if return_evecs else None,
-            np.array(computed_matrices) if return_matrices else None)
+    return (computed_evals, computed_evecs if return_vecs else None)
+
+def calc_evals_batch(weights_list, points_list, gammas=np.linspace(0,1,201)[:-1], mode="forw recover activations", smart_gamma_func=None, output_layer_relevancies=None, return_matrices=False, num_evals=None, return_evecs=False, abs_evals=False, svd_mode=False):
+    """
+    Wrapper function around calc_mats_batch & calc_vals_batch, mostly for backwards compatibility.
+    """
+    matrices = calc_mats_batch(weights_list=weights_list, points_list=points_list, gammas=gammas, mode=mode, output_layer_relevancies=output_layer_relevancies, smart_gamma_func=smart_gamma_func)
+    evals, evecs = calc_vals_batch(matrices=matrices, num_vals=num_evals, return_vecs=return_evecs, svd_mode=svd_mode, abs_vals=abs_evals)
+    
+    return (evals, evecs, np.array(matrices) if return_matrices else None)
 
 def col_norms_for_matrices(comp_mats, ord=1):
     """
@@ -669,5 +663,10 @@ def smart_gamma_wo_sign_flips(W, curr):
     return mask
 
 def prune_coo_array(mat, atol=0):
+    """
+    Remove 0 entries from coo_array.
+    """
+    if not isinstance(mat, coo_array): return mat
+
     mask = (np.abs(mat.data) > atol)
     return coo_array((mat.data[mask], (mat.row[mask], mat.col[mask])), shape=mat.shape)
