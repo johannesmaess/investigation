@@ -3,7 +3,7 @@ import torch
 from scipy.sparse import coo_array
 
 # lrp-tutorial sub repo
-from lrp_tutorial import utils as tut_utils
+import util.util_tutorial as tut_utils
 
 from util.util_gamma_rule import \
     conv_matrix_from_pytorch_layer, \
