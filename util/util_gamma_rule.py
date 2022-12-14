@@ -376,8 +376,8 @@ def calc_vals_batch(matrices, num_vals='auto', return_vecs=False, svd_mode=True,
 
     # calculate decomposition
     for i, matrices_per_weight in enumerate(matrices):
-        for j, matrices_per_point in tqdm(enumerate(matrices_per_weight)):
-            for k, matrix_per_gamma in enumerate(matrices_per_point):
+        for j, matrices_per_point in enumerate(matrices_per_weight):
+            for k, matrix_per_gamma in tqdm(enumerate(matrices_per_point)):
                 evals, evecs = calc_vals(matrix_per_gamma, num_vals=vals_per_matrix[i,j], return_vecs=return_vecs)
                 computed_evals[i, j, k, :len(evals)] = evals
                 if return_vecs: computed_evecs[i, j, k, :len(evecs)] = evecs
