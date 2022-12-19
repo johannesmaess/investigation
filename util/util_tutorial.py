@@ -1,5 +1,7 @@
-from copy import copy
+import copy
 from torch import nn
+import numpy as np 
+import matplotlib.pyplot as plt
 
 
 # --------------------------------------------------------------
@@ -49,6 +51,44 @@ def toconv(layers):
             newlayers += [layer]
 
     return newlayers
+
+# --------------------------------------
+# Visualizing data
+# --------------------------------------
+
+def heatmap(R,sx,sy, colorbar=False):
+
+    b = 10*((np.abs(R)**3.0).mean()**(1.0/3))
+
+    from matplotlib.colors import ListedColormap
+    my_cmap = plt.cm.seismic(np.arange(plt.cm.seismic.N))
+    my_cmap[:,0:3] *= 0.85
+    my_cmap = ListedColormap(my_cmap)
+    plt.figure(figsize=(sx,sy))
+    plt.subplots_adjust(left=0,right=1,bottom=0,top=1)
+    plt.axis('off')
+    ret = plt.imshow(R,cmap=my_cmap,vmin=-b,vmax=b,interpolation='nearest')
+    if colorbar: plt.colorbar(ret)
+    plt.show()
+
+def heatmap_batch(R_batch,sx,sy):
+
+    from matplotlib.colors import ListedColormap
+    my_cmap = plt.cm.seismic(np.arange(plt.cm.seismic.N))
+    my_cmap[:,0:3] *= 0.85
+    my_cmap = ListedColormap(my_cmap)
+
+    fig, axs = plt.subplots(1, len(R_batch), figsize=(sx * len(R_batch),sy))
+    plt.subplots_adjust(left=0,right=1,bottom=0,top=1)
+    plt.axis('off')
+    for R, ax in zip(R_batch, axs):
+        if np.isnan(R).sum(): 
+            print(np.isnan(R).mean(dtype=float))
+            continue
+        b = 10*((np.abs(R)**3.0).mean()**(1.0/3))
+        ax.imshow(R,cmap=my_cmap,vmin=-b,vmax=b,interpolation='nearest')
+    plt.show()
+
 
 # --------------------------------------------------------------
 # 1000 classes predicted by the VGG network

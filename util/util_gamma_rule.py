@@ -1,4 +1,5 @@
 from functools import partial
+from tqdm.notebook import tqdm
 
 import numpy as np
 from numpy.linalg import eig, svd
@@ -6,12 +7,13 @@ from numpy.linalg import eig, svd
 import torch
 
 from scipy.sparse import coo_array
-from scipy.sparse.linalg import eigs, svds
 
 import matplotlib.pyplot as plt
 # import seaborn as sns
 
-from tqdm import tqdm
+# import os
+# os.environ["SCIPY_USE_PROPACK"] = "1"
+from scipy.sparse.linalg import eigs, svds
 
 
 def global_conv_matrix(conv, bias=None, img_shape=None, zero_padding=(0,0),
@@ -313,17 +315,17 @@ def calc_vals(M, num_vals, return_vecs=False, svd_mode=True, abs_vals=False):
     For a given matrix, calculate its eigen or singular-value decomposition and return it sorted by the values magnitudes.
     """
     if type(M) is coo_array:
-        if num_vals==min(M.shape): 
+        if num_vals==min(M.shape) and 0: 
+            print('switch')
             # make matrix dense, to use numpy eig/svd
             M = M.toarray()
         else:
             if not svd_mode:     vals, vecs    = eigs(M, k=num_vals, which="LM")
             else:            
-                if return_vecs: vecs, vals, _ = svds(M, k=num_vals, which="LM", return_singular_vectors='u')
-                else:                  vals    = svds(M, k=num_vals, which="LM", return_singular_vectors=False)
+                if return_vecs: vecs, vals, _ = svds(M, k=num_vals, which="LM", return_singular_vectors='u'  )
+                else:                  vals   = svds(M, k=num_vals, which="LM", return_singular_vectors=False)
     if type(M) is np.ndarray:
-        if np.any(np.isnan(M)): 
-            print(i)
+        if np.any(np.isnan(M)):
             print(M)
             return
         if not svd_mode: vals, vecs    = eig(M)
@@ -338,18 +340,24 @@ def calc_vals(M, num_vals, return_vecs=False, svd_mode=True, abs_vals=False):
     # return sorted vals and vecs
     return (vals[order], np.array(vecs).T[order] if return_vecs else None)
 
-def calc_vals_batch(matrices, num_vals='auto', return_vecs=False, svd_mode=True, abs_vals=False):
+def calc_vals_batch(matrices, num_vals='auto', return_vecs=False, svd_mode=True, abs_vals=False, tqdm_for='matrix'):
     """
     Wraps around calc_evals to make calls for multiple weights, and multiple reference points.
     Mostly useful for determining an efficient number of vals to compute per matrix, putting the results into uniform arrays, and its checks.
     """
+    # display progress util
+    itg, itp, itm = [lambda x: x]*3
+    if tqdm_for=='matrix': itm = tqdm
+    if tqdm_for=='point':  itp = tqdm
+    if tqdm_for=='gamma':  itg = tqdm
+
     n_weights, n_points, n_gammas = matrices.shape[:3]
     assert len(matrices[0, 0, 0].shape) == 2, "'matrices' should contain 2D arrays (np.ndarray or scipy.coo_array), nested in a 2D structure"
 
     if abs_vals or svd_mode: dtype=np.float
     else:                    dtype=np.cfloat
 
-    # if return_evcs==True, we want all matrices to be of the same size
+    # if return_evcs==True, we want all matrices to be of the same size. also extrace vec_len.
     if return_vecs: 
         vec_len = matrices[0, 0, 0].shape[0]
         for i, matrices_per_weight in enumerate(matrices):
@@ -375,9 +383,9 @@ def calc_vals_batch(matrices, num_vals='auto', return_vecs=False, svd_mode=True,
     if return_vecs: computed_evecs = np.zeros((n_weights, n_points, n_gammas, vals_per_matrix.max(), vec_len), dtype=dtype)
 
     # calculate decomposition
-    for i, matrices_per_weight in enumerate(matrices):
-        for j, matrices_per_point in enumerate(matrices_per_weight):
-            for k, matrix_per_gamma in tqdm(enumerate(matrices_per_point)):
+    for i, matrices_per_weight in itm(enumerate(matrices)):
+        for j, matrices_per_point in itp(enumerate(matrices_per_weight)):
+            for k, matrix_per_gamma in itg(enumerate(matrices_per_point)):
                 evals, evecs = calc_vals(matrix_per_gamma, num_vals=vals_per_matrix[i,j], return_vecs=return_vecs)
                 computed_evals[i, j, k, :len(evals)] = evals
                 if return_vecs: computed_evecs[i, j, k, :len(evecs)] = evecs

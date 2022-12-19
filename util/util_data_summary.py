@@ -21,7 +21,7 @@ def heatshow(data, print_data=False, lim=None, ax=plt):
     if print_data: print(data[:, (np.abs(data).sum(axis=0) != 0)].round(2))
     return ax.imshow(data, vmin=-lim, vmax=lim, cmap="RdYlGn")
 
-def plot_hists_on_ax(ax, vals_for_point, bins = [0, 1e-5, 1e-4, 1e-3, 1e-2, .1, 1, 10, 100, 1e4, 1e5, 1e6, 1e7], max_val=1e4): 
+def plot_hists_on_ax(ax, vals_for_point, bins = [0, 1e-5, 1e-4, 1e-3, 1e-2, .1, 1, 10, 100, 1e4, 1e5, 1e6, 1e7], max_val=1e7): 
     bins = np.array(bins)
     if max_val: bins = bins[bins <= max_val]
     assert len(bins.shape) == 1 and np.all(np.diff(bins) > 0), "Bin boundaries should be monotonically increasing"
@@ -39,7 +39,8 @@ def plot_hists_on_ax(ax, vals_for_point, bins = [0, 1e-5, 1e-4, 1e-3, 1e-2, .1, 
 
     for i_gamma, vals_for_gamma in enumerate(vals_for_point):
         counts, _ = np.histogram(vals_for_gamma, bins=bins)
-        ax.bar(x, counts)
+        bars = ax.bar(x, counts)
+        ax.bar_label(bars, padding=3)
 
         ax_title = f'Mean: {vals_for_gamma.mean():.1f}\n95th Perc: {np.percentile(vals_for_gamma, 95).round(1)}\nStdv: {vals_for_gamma.std():.1f}'
         ax.annotate(ax_title, xy=(0.85, 0.8), xycoords='axes fraction')
@@ -80,7 +81,7 @@ def distribution_plot(vals, gammas, mode='hist', cutoff = 1e-2, aggregate_over=N
     fig, axs = plt.subplots(*n_ax, figsize=figsize, sharey=sharey)
     axs = np.array(axs).reshape((n_trans, n_point)) # for correct loop iteration
 
-    hist_kwargs['max_val'] = vals.max() * 10
+    # hist_kwargs['max_val'] = vals.max() * 10
 
     for i_trans, vals_for_trans in enumerate(vals):
         for i_point, vals_for_point in enumerate(vals_for_trans):

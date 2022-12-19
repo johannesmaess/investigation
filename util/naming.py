@@ -1,0 +1,12 @@
+import numpy as np
+
+device = "cpu"
+MNIST_CNN_PATH = './models/'
+data_dir = "./dataset"
+cat16_dir = data_dir + "/cat16"
+
+gammas3 = [0, .25, 'inf']
+gammas5 = [0, .125, .25, .5, 'inf']
+gammas_0_1_21_inf = list(np.linspace(0,1,21).round(3)) + ['inf']
+
+d3_after_conv_layer = [3, 5, 8, 10, 12, 16]
