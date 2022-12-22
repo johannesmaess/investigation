@@ -68,6 +68,7 @@ def compute_relevancies(mode, layers, A, output_rels='correct class', target=Non
 
     for l in range(1, l_out)[::-1]:
         A[l] = (A[l].data).requires_grad_(True)
+        print(l, layers[l])
 
         if isinstance(layers[l],torch.nn.MaxPool2d): layers[l] = torch.nn.AvgPool2d(2)
         if isinstance(layers[l],torch.nn.Conv2d) or isinstance(layers[l],torch.nn.AvgPool2d):
@@ -79,21 +80,16 @@ def compute_relevancies(mode, layers, A, output_rels='correct class', target=Non
             helper_layer = tut_utils.newlayer(layers[l], rho)
 
             if isinstance(layers[l],torch.nn.Conv2d):
-                if 'Gamma.' in mode:
-                    curr_gamma =    float(gam) if 'inf' != (gam := mode.split("gamma=")[1].split(" ")[0]) else 1e8
+                if 'Gamma' in mode:
                     layer_smaller = float(mode.split("l<"    )[1].split(" ")[0])
                     if l < layer_smaller:
-                        # print(l, str(layers[l]).split('(')[0], '='*10)
-                        rho = lambda p: p + curr_gamma*p.clamp(min=0);
-                        helper_layer = tut_utils.newlayer(layers[l], rho)
-
-                elif 'Gamma mat.' in mode:
-                    curr_gamma =    float(gam) if 'inf' != (gam := mode.split("gamma=")[1].split(" ")[0]) else 1e8
-                    layer_smaller = float(mode.split("l<"    )[1].split(" ")[0])
-                    if l < layer_smaller:
-                        helper_layer = copy.deepcopy(layers_conv_as_mat[l])
-                        helper_layer.set_gamma(curr_gamma)
-                
+                        curr_gamma = float(gam) if 'inf' != (gam := mode.split("gamma=")[1].split(" ")[0]) else 1e8
+                        if 'Gamma.' in mode:
+                            rho = lambda p: p + curr_gamma*p.clamp(min=0);
+                            helper_layer = tut_utils.newlayer(layers[l], rho)
+                        elif 'Gamma mat.' in mode:
+                            helper_layer = copy.deepcopy(layers_conv_as_mat[l]) # todo: in the notebook I used a precomputation "layers_conv_as_mat"
+                            helper_layer.set_gamma(curr_gamma)
 
             incr = lambda z: z+1e-9
             z = incr(helper_layer.forward(A[l]))                            # step 1
@@ -140,7 +136,8 @@ def compute_relevancies(mode, layers, A, output_rels='correct class', target=Non
 
 
 # compute global LRP transition matrix
-def LRP_global_mat(model, point, gamma, l_leq = 1000, delete_unnecessary_rows = True, l_inp=0, l_out=-1):
+def LRP_global_mat(model, point, gamma, l_leq = 1000, delete_unactivated_subnetwork = 'mask', l_inp=0, l_out=-1):    
+    assert len(point.shape) == 1, f"Dont pass batch. 'point' should have 1 dim but shape is {point.shape}"
     if gamma=='inf': gamma=1e8
 
     # forward pass: get activations & its shape per layer
@@ -151,8 +148,11 @@ def LRP_global_mat(model, point, gamma, l_leq = 1000, delete_unnecessary_rows = 
     dimensionality_flat = np.prod(dimensionality)
     basis_vectors = torch.eye(dimensionality_flat).reshape(dimensionality_flat, *dimensionality)
 
-    # dimensionality_flat = 5
-    # basis_vectors = basis_vectors[:dimensionality_flat]
+    if delete_unactivated_subnetwork == True:
+        # don't calculate the basis vector projections for those output elemnts/neurons that are not activated.
+        mask = A[l_out].flatten() > 0
+        basis_vectors = basis_vectors[mask]
+        dimensionality_flat = sum(mask)
 
     # repeat activation per layer, as often as the number of basis vectors
     A_repeated = [torch.cat([a] * dimensionality_flat) for a in A]
@@ -161,17 +161,16 @@ def LRP_global_mat(model, point, gamma, l_leq = 1000, delete_unnecessary_rows = 
     R_basis_vector_projections = compute_relevancies(mode=f'Gamma. l<{l_leq} gamma={gamma}', layers=layers, A=A_repeated, output_rels=basis_vectors, l_out=l_out, return_only_l=l_inp)
     LRP_backward = R_basis_vector_projections.reshape((dimensionality_flat, -1)).T
 
-    # print(LRP_backward.shape)
-    # for i in range(3):
-    #     plt.imshow(LRP_backward.reshape((28, 28, 10))[:, :, i])
-    #     plt.show()
+    if delete_unactivated_subnetwork == True:
+        # delete such rows that correspond to unactivated **input** neurons
+        mask = A[l_inp].flatten() > 0
+        LRP_backward = LRP_backward[mask]
 
-    if delete_unnecessary_rows:
+    if delete_unactivated_subnetwork == 'mask': # don't delete the rows, but set their entries to zero.
         l_out_activation = A_repeated[l_out][0].detach().numpy().flatten()[None]
         assert LRP_backward.shape[1] == l_out_activation.shape[1], f"{LRP_backward.shape[1]},  {l_out_activation.shape[1]}"
         LRP_backward *= (l_out_activation > 0)
 
-    
 
     return coo_array(LRP_backward.detach().numpy())
 

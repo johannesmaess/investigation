@@ -98,10 +98,10 @@ def equality_test__forward_hook__lrp_back_matrix():
                     (z*s).sum().backward(); c = inp_img.grad                         # step 3
                     inp_rel__forward_hook = (inp_img*c).data 
                     
-                    for delete_unnecessary_rows in [False, True]:
+                    for delete_unactivated_subnetwork in [False, True]:
                         # computation of input relevancies by LRP backward matrix
                         forw = global_conv_matrix_from_pytorch_layer(conv_layer, (inp_feats, *inp_img_shape), (out_feats, *out_img_shape))
-                        back = back_matrix(forw, inp_img.data.flatten(), gamma=gamma, delete_unnecessary_rows=delete_unnecessary_rows)
+                        back = back_matrix(forw, inp_img.data.flatten(), gamma=gamma, delete_unactivated_subnetwork=delete_unactivated_subnetwork)
                         inp_rel__lrp_matrix = back @ out_rel.flatten()
 
                         # check equality of methods

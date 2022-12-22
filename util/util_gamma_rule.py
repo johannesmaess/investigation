@@ -4,6 +4,8 @@ from tqdm.notebook import tqdm
 import numpy as np
 from numpy.linalg import eig, svd
 
+from util.util_data_summary import pretty_num
+
 import torch
 
 from scipy.sparse import coo_array
@@ -230,14 +232,14 @@ def forw_surrogate_matrix(W, curr, gamma, checks=True, recover_activations=True,
     
     return R_i_to_j
 
-def back_matrix(W, curr, gamma, smart_gamma_func=None, delete_unnecessary_rows=False, log=False):
+def back_matrix(W, curr, gamma, smart_gamma_func=None, delete_unactivated_subnetwork=False, log=False):
     """
     Note: R_j_forwards is the activation of the forward surrogate model, which is equivalent to the normal NN's pre-ReLU activation z.
 
     Params:
-    delete_unnecessary_rows: If the output Relevancy R_j_forward < 0, then a_j = 0, then R_j_backwards = 0.
+    delete_unactivated_subnetwork: If the output Relevancy R_j_forward < 0, then a_j = 0, then R_j_backwards = 0.
     In using the back_matrix later, R_i_given_j will in these case always be multiplied by 0.
-    Setting delete_unnecessary_rows=True, recognizes thes rows in the matrix and sets their entries R_i_given_j=0, to simplify the matrix.
+    Setting delete_unactivated_subnetwork='mask', recognizes thes rows in the matrix and sets their entries R_i_given_j=0, to simplify the matrix.
     """
 
     assert curr is not None, "Reference point needed for backward matrix"
@@ -248,7 +250,7 @@ def back_matrix(W, curr, gamma, smart_gamma_func=None, delete_unnecessary_rows=F
     R_i_and_j   = R_j_and_i.T
     R_j         = R_i_and_j.sum(axis=0) # + 1e-9
 
-    if delete_unnecessary_rows: 
+    if delete_unactivated_subnetwork: 
         R_j[R_j <= 0] = np.inf
         R_j[(W@curr) <= 0] = np.inf
 
@@ -293,8 +295,8 @@ def calc_mats(M, point, gammas, mode, output_layer_relevancies=None, smart_gamma
     matrix_func_dict = {
         "forw recover activations": partial(forw_surrogate_matrix, recover_activations=True), 
         "forw":                     partial(forw_surrogate_matrix, recover_activations=False), 
-        "back":                     partial(back_matrix,           delete_unnecessary_rows=False),
-        "back clip":                partial(back_matrix,           delete_unnecessary_rows=True),
+        "back":                     partial(back_matrix,           delete_unactivated_subnetwork=False),
+        "back clip":                partial(back_matrix,           delete_unactivated_subnetwork='mask'),
         "back joint":               partial(back_joint_matrix,     R_j_backwards=output_layer_relevancies),
     }
     assert mode in matrix_func_dict, f'Mode "{mode}" not available'
@@ -315,21 +317,24 @@ def calc_vals(M, num_vals, return_vecs=False, svd_mode=True, abs_vals=False):
     For a given matrix, calculate its eigen or singular-value decomposition and return it sorted by the values magnitudes.
     """
     if type(M) is coo_array:
-        if num_vals==min(M.shape) and 0: 
-            print('switch')
-            # make matrix dense, to use numpy eig/svd
-            M = M.toarray()
-        else:
-            if not svd_mode:     vals, vecs    = eigs(M, k=num_vals, which="LM")
-            else:            
-                if return_vecs: vecs, vals, _ = svds(M, k=num_vals, which="LM", return_singular_vectors='u'  )
-                else:                  vals   = svds(M, k=num_vals, which="LM", return_singular_vectors=False)
-    if type(M) is np.ndarray:
+        if num_vals==min(M.shape): 
+            # the svds solver wants num_vals > min(M.shape).
+            # pad coo_array, with one imagined columns full of zero.
+            larger_shape = np.maximum(M.shape, min(M.shape)+1)
+            M = coo_array((M.data, (M.row, M.col)), shape=larger_shape)
+
+        if not svd_mode:     vals, vecs    = eigs(M, k=num_vals, which="LM")
+        else:            
+            if return_vecs: vecs, vals, _ = svds(M, k=num_vals, which="LM", return_singular_vectors='u'  )
+            else:                  vals   = svds(M, k=num_vals, which="LM", return_singular_vectors=False)
+    elif type(M) is np.ndarray:
         if np.any(np.isnan(M)):
             print(M)
             return
         if not svd_mode: vals, vecs    = eig(M)
         else:            vecs, vals, _ = svd(M, full_matrices=False)
+    else:
+        raise f"Invalid type {type(M)}"
 
     vals = np.array(vals)
     if abs_vals: vals = np.abs(vals)
@@ -435,11 +440,16 @@ def col_norms_for_matrices(comp_mats, ord=1):
 
 def plot_evals_lineplot(precomputed_evals, gammas=np.linspace(0,1,201)[:-1], 
                 num_evals=None, mark_positive_slope=False, percentile_to_plot=None, plot_only_non_zero=False, ylim=4, one_plot_per='weight',
-                ylabel="Singular values",
-                yscale='linear', xscale='linear', green_line_at_x=None):
+                ylabel="Singular values", title=None,
+                yscale='linear', xscale='linear', 
+                sharey=False,
+                green_line_at_x=None,
+                tag_line=None,
+                xtick_mask=None):
     """
     Plots the evolution of Eigenvalues with increasing gammas in a lineplot.
     """
+    if title is None: title=ylabel
 
     # reduce number of eval lines to show
     if num_evals:
@@ -456,10 +466,10 @@ def plot_evals_lineplot(precomputed_evals, gammas=np.linspace(0,1,201)[:-1],
     y_lim_lower = {'linear':0, 'log': .1}[yscale]
 
     figsize = (20, 10) if n_ax==(1,1) else (5*n_ax[1], 3*n_ax[0])
-    fig, axs = plt.subplots(*n_ax, figsize=figsize)
+    fig, axs = plt.subplots(*n_ax, figsize=figsize, sharey=sharey)
     axs, ax_i, ax = np.array(axs).flatten(), -1, None
 
-    fig.suptitle(f'Evolution of {ylabel} with increasing $\gamma$' +
+    fig.suptitle(f'Evolution of {title} with increasing $\gamma$' +
             ('\nFat bar below indicates section of positive derivative' if mark_positive_slope else ''))
 
     ### helper functions ###
@@ -484,17 +494,18 @@ def plot_evals_lineplot(precomputed_evals, gammas=np.linspace(0,1,201)[:-1],
         
     def ax_show():
         nonlocal ax
-        # ax.legend(loc='upper right')
+        if tag_line is not None:
+            ax.legend(loc='upper right')
 
     ### preemptive checks ###
     assert np.all([[len(line) == len(gammas) for line in sub_list] for sub_list in precomputed_evals]), "Shape doesn't match."
 
     if one_plot_per=='in total': ax_init()
 
-    for i, data_for_one_matrix_for_all_points in enumerate(precomputed_evals): # iterate matrices
+    for i, per_points in enumerate(precomputed_evals): # iterate matrices
         if one_plot_per=='weight': ax_init()
 
-        for j, evals in enumerate(data_for_one_matrix_for_all_points): # iterate points
+        for j, evals in enumerate(per_points): # iterate points
             if one_plot_per=='point': ax_init()
             if percentile_to_plot:
                 if np.all(precomputed_evals >= 0):
@@ -519,15 +530,25 @@ def plot_evals_lineplot(precomputed_evals, gammas=np.linspace(0,1,201)[:-1],
             Y = evals + np.random.normal(0, .005, size=evals.shape[1])[None, :] # add some random noise, such that lines don't overlap.
 
             labels = [f'Exp. {i+1}, Point {j+1}, EV {k+1}' for k in range(evals.shape[1])]
+            if tag_line is not None:
+                assert len(tag_line) == len(labels), "Invalid labels per line passed."
+                labels = tag_line
             
             # If gammas are numerical, use them to determine x position of lines. If they are strings, plot evals in equal spacing, and label them with the 'gammas'
             if np.any([type(g) is str for g in gammas]):
-                xticks = np.arange(len(gammas))
-                ax.set_xticks(xticks)
-                ax.set_xticklabels(gammas)
-                ax.plot(xticks, Y, label=labels)
+                xtick = np.arange(len(gammas))
+                ax.plot(xtick, Y, label=labels)
+
+                if xtick_mask is None: xtick_mask = np.full_like(xtick, True, dtype=bool)
+
+                ax.set_xticks(xtick[xtick_mask])
+                lbls = gammas
+                lbls = [pretty_num(lbl) for lbl in lbls]
+                lbls = np.array(lbls)[xtick_mask]
+                ax.set_xticklabels(lbls)
             else:
                 ax.plot(gammas, Y, label=labels)
+
 
             if mark_positive_slope: # plot a scatter dot if the series values is increasing
                 # calc sign of derivative
