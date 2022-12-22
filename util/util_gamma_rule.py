@@ -438,7 +438,7 @@ def col_norms_for_matrices(comp_mats, ord=1):
     return col_norms
 
 
-def plot_evals_lineplot(precomputed_evals, gammas=np.linspace(0,1,201)[:-1], 
+def plot_evals_lineplot(vals, gammas=np.linspace(0,1,201)[:-1], 
                 num_evals=None, mark_positive_slope=False, percentile_to_plot=None, plot_only_non_zero=False, ylim=4, one_plot_per='weight',
                 ylabel="Singular values", title=None,
                 yscale='linear', xscale='linear', 
@@ -453,17 +453,17 @@ def plot_evals_lineplot(precomputed_evals, gammas=np.linspace(0,1,201)[:-1],
 
     # reduce number of eval lines to show
     if num_evals:
-        precomputed_evals = precomputed_evals[:, :, :, :num_evals]
+        vals = vals[:, :, :, :num_evals]
 
     n_ax_dict = {
         'in total': (1, 1),
-        'weight': (1, precomputed_evals.shape[0]),
-        'point': precomputed_evals.shape[:2]
+        'weight': (1, vals.shape[0]),
+        'point': vals.shape[:2]
     }
     assert one_plot_per in ['point', 'weight', 'in total']
     n_ax = n_ax_dict[one_plot_per]
 
-    y_lim_lower = {'linear':0, 'log': .1}[yscale]
+    y_lim_lower = {'linear':0, 'log': max(1e-3, vals.min())*.9}[yscale]
 
     figsize = (20, 10) if n_ax==(1,1) else (5*n_ax[1], 3*n_ax[0])
     fig, axs = plt.subplots(*n_ax, figsize=figsize, sharey=sharey)
@@ -498,17 +498,17 @@ def plot_evals_lineplot(precomputed_evals, gammas=np.linspace(0,1,201)[:-1],
             ax.legend(loc='upper right')
 
     ### preemptive checks ###
-    assert np.all([[len(line) == len(gammas) for line in sub_list] for sub_list in precomputed_evals]), "Shape doesn't match."
+    assert np.all([[len(line) == len(gammas) for line in sub_list] for sub_list in vals]), "Shape doesn't match."
 
     if one_plot_per=='in total': ax_init()
 
-    for i, per_points in enumerate(precomputed_evals): # iterate matrices
+    for i, per_points in enumerate(vals): # iterate matrices
         if one_plot_per=='weight': ax_init()
 
         for j, evals in enumerate(per_points): # iterate points
             if one_plot_per=='point': ax_init()
             if percentile_to_plot:
-                if np.all(precomputed_evals >= 0):
+                if np.all(vals >= 0):
                     y_lim_upper = np.percentile(evals, percentile_to_plot) + .2
                     ax.set_ylim(y_lim_lower, y_lim_upper)
                 else: # we did not take the absolute of evals

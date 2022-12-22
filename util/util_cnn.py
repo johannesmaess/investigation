@@ -1,13 +1,15 @@
+import os
 from tqdm import tqdm
 import numpy as np
 import pandas as pd
-from sklearn.model_selection import train_test_split
+
 import torch
 from torch.autograd import Variable
+from sklearn.model_selection import train_test_split
 # import torchvision
 # import torch.nn.functional as F
 
-
+from util.naming import MNIST_CNN_PATH, device
 
 # ### DATASET ###
 
@@ -158,7 +160,7 @@ class CNNModel(torch.nn.Module):
         return self.seq.forward(x)
 
 
-def data_loaders():
+def data_loaders(shuffle = True):
     # Prepare Dataset
     # load data
     batch_size = 100
@@ -188,10 +190,15 @@ def data_loaders():
     test = torch.utils.data.TensorDataset(featuresTest,targetsTest)
 
     # data loader
-    train_loader = torch.utils.data.DataLoader(train, batch_size = batch_size, shuffle = False)
-    test_loader = torch.utils.data.DataLoader(test, batch_size = batch_size, shuffle = False)
+    train_loader = torch.utils.data.DataLoader(train, batch_size = batch_size, shuffle = shuffle)
+    test_loader = torch.utils.data.DataLoader(test, batch_size = batch_size, shuffle = shuffle)
 
     return train_loader, test_loader
+
+def first_mnist_batch():
+    _, test_loader = data_loaders(shuffle = False)
+    for data, target in test_loader:
+        return data, target
 
 
 def train(model, n_iters, train_loader, test_loader):
@@ -290,3 +297,15 @@ def params_from_filename(fn):
     return int(seed), \
            [int(width) for width in cb1_channels], \
            [int(width) for width in cb2_channels]
+
+def load_mnist_v4_models():
+    # load v4 models
+    model_dict = {}
+    for fn in os.listdir(MNIST_CNN_PATH):
+        if 'mnist_cnn_v4' in fn:
+            params = params_from_filename(fn)
+            cnn_model = CNNModel(*params).to(device)
+            cnn_model.load_state_dict(torch.load(os.path.join(MNIST_CNN_PATH, fn)))
+            model_dict[fn[13:-6]] = cnn_model
+
+    return model_dict

@@ -34,6 +34,24 @@ def forward_and_explain(model, data, mode):
     A, layers = layerwise_forward_pass(model, data)
     return compute_relevancies(mode, layers, A, output_rels='predicted class', return_only_l=0)
 
+"""
+This code was previously used in the notebook to precompute the forward matrices for conv layers.
+We might need it in the future.
+
+layers_conv_as_mat = [None]*L
+for l in range(L):
+    if isinstance(layers[l], torch.nn.Conv2d):
+        layers_conv_as_mat[l] = Conv2dAsMatrixLayer(layers[l], A[l][0].shape, A[l+1][0].shape)
+        a = layers_conv_as_mat[l].forward(A[l])
+        b = layers[l]            .forward(A[l])
+
+        assert a.shape == b.shape, "Inequal shape"
+        assert torch.allclose(a, b, atol=1e-5), f"Inequal result, max diff: {(a-b).abs().max()}"
+
+"""
+
+
+
 def compute_relevancies(mode, layers, A, output_rels='correct class', target=None, l_out=-1, return_only_l=None):
     """
     Applies a LRP backpropagation through all or a subset of layers of the network.
@@ -68,12 +86,10 @@ def compute_relevancies(mode, layers, A, output_rels='correct class', target=Non
 
     for l in range(1, l_out)[::-1]:
         A[l] = (A[l].data).requires_grad_(True)
-        print(l, layers[l])
+        # print(l, str(layers[l]).split('(')[0])
 
         if isinstance(layers[l],torch.nn.MaxPool2d): layers[l] = torch.nn.AvgPool2d(2)
         if isinstance(layers[l],torch.nn.Conv2d) or isinstance(layers[l],torch.nn.AvgPool2d):
-
-            # print(l, str(layers[l]).split('(')[0])
 
             # default: LRP-0.
             rho = lambda p: p;
