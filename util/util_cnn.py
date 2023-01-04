@@ -160,10 +160,9 @@ class CNNModel(torch.nn.Module):
         return self.seq.forward(x)
 
 
-def data_loaders(shuffle = True):
+def data_loaders(shuffle = True, batch_size = 100):
     # Prepare Dataset
     # load data
-    batch_size = 100
     train = pd.read_csv(r"./dataset/kaggle_input/train.csv",dtype = np.float32)
 
     # split data into features(pixels) and labels(numbers from 0 to 9)
@@ -195,8 +194,8 @@ def data_loaders(shuffle = True):
 
     return train_loader, test_loader
 
-def first_mnist_batch():
-    _, test_loader = data_loaders(shuffle = False)
+def first_mnist_batch(batch_size = 100):
+    _, test_loader = data_loaders(shuffle = False, batch_size = batch_size)
     for data, target in test_loader:
         return data, target
 

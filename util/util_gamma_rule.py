@@ -10,6 +10,7 @@ import torch
 
 from scipy.sparse import coo_array
 
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 # import seaborn as sns
 
@@ -366,7 +367,7 @@ def calc_vals_batch(matrices, num_vals='auto', return_vecs=False, svd_mode=True,
     if return_vecs: 
         vec_len = matrices[0, 0, 0].shape[0]
         for i, matrices_per_weight in enumerate(matrices):
-            for j, matrices_per_point in tqdm(enumerate(matrices_per_weight)):
+            for j, matrices_per_point in enumerate(matrices_per_weight):
                 for k, matrix_per_gamma in enumerate(matrices_per_point):
                     assert matrix_per_gamma.shape == matrices[0,0,0].shape, "Pass only matrices of same shape"
 
@@ -444,7 +445,7 @@ def plot_evals_lineplot(vals, gammas=np.linspace(0,1,201)[:-1],
                 yscale='linear', xscale='linear', 
                 sharey=False,
                 green_line_at_x=None,
-                tag_line=None,
+                tag_line=None, colormap='viridis',
                 xtick_mask=None):
     """
     Plots the evolution of Eigenvalues with increasing gammas in a lineplot.
@@ -537,8 +538,6 @@ def plot_evals_lineplot(vals, gammas=np.linspace(0,1,201)[:-1],
             # If gammas are numerical, use them to determine x position of lines. If they are strings, plot evals in equal spacing, and label them with the 'gammas'
             if np.any([type(g) is str for g in gammas]):
                 xtick = np.arange(len(gammas))
-                ax.plot(xtick, Y, label=labels)
-
                 if xtick_mask is None: xtick_mask = np.full_like(xtick, True, dtype=bool)
 
                 ax.set_xticks(xtick[xtick_mask])
@@ -547,7 +546,11 @@ def plot_evals_lineplot(vals, gammas=np.linspace(0,1,201)[:-1],
                 lbls = np.array(lbls)[xtick_mask]
                 ax.set_xticklabels(lbls)
             else:
-                ax.plot(gammas, Y, label=labels)
+                xtick=gammas
+
+            if colormap is not None:
+                ax.set_prop_cycle(mpl.cycler('color', [mpl.colormaps[colormap](k) for k in np.linspace(0, 1, Y.shape[1])]))  
+            ax.plot(xtick, Y, label=labels)
 
 
             if mark_positive_slope: # plot a scatter dot if the series values is increasing

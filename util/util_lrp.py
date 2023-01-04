@@ -161,21 +161,21 @@ def LRP_global_mat(model, point, gamma, l_leq = 1000, delete_unactivated_subnetw
     A_shapes = [a.shape[1:] for a in A]
 
     dimensionality = A_shapes[l_out]
-    dimensionality_flat = np.prod(dimensionality)
-    basis_vectors = torch.eye(dimensionality_flat).reshape(dimensionality_flat, *dimensionality)
+    num_basis_vectors = np.prod(dimensionality)
+    basis_vectors = torch.eye(num_basis_vectors).reshape(num_basis_vectors, *dimensionality)
 
     if delete_unactivated_subnetwork == True:
         # don't calculate the basis vector projections for those output elemnts/neurons that are not activated.
         mask = A[l_out].flatten() > 0
         basis_vectors = basis_vectors[mask]
-        dimensionality_flat = sum(mask)
+        num_basis_vectors = sum(mask)
 
     # repeat activation per layer, as often as the number of basis vectors
-    A_repeated = [torch.cat([a] * dimensionality_flat) for a in A]
+    A_repeated = [torch.cat([a] * num_basis_vectors) for a in A]
     
     # LRP backward and reshape
     R_basis_vector_projections = compute_relevancies(mode=f'Gamma. l<{l_leq} gamma={gamma}', layers=layers, A=A_repeated, output_rels=basis_vectors, l_out=l_out, return_only_l=l_inp)
-    LRP_backward = R_basis_vector_projections.reshape((dimensionality_flat, -1)).T
+    LRP_backward = R_basis_vector_projections.reshape((num_basis_vectors, -1)).T
 
     if delete_unactivated_subnetwork == True:
         # delete such rows that correspond to unactivated **input** neurons
