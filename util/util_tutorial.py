@@ -56,7 +56,7 @@ def toconv(layers):
 # Visualizing data
 # --------------------------------------
 
-def heatmap(R,sx,sy, colorbar=False):
+def heatmap(R,sx=2,sy=2, colorbar=False):
 
     b = 10*((np.abs(R)**3.0).mean()**(1.0/3))
 

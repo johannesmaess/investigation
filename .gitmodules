@@ -3,4 +3,4 @@
 	url = git@git.tu-berlin.de:thomas_schnake/paper_gnn_lrp.git
 [submodule "explanations_can_be_manipulated"]
 	path = explanations_can_be_manipulated
-	url = https://github.com/pankessel/explanations_can_be_manipulated.git
+	url = https://github.com/johannesmaess/explanations_can_be_manipulated.git
