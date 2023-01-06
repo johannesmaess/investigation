@@ -10,6 +10,7 @@ from sklearn.model_selection import train_test_split
 # import torch.nn.functional as F
 
 from util.naming import MNIST_CNN_PATH, device
+from util.util_pickle import load_shaps
 
 # ### DATASET ###
 
@@ -160,7 +161,11 @@ class CNNModel(torch.nn.Module):
         return self.seq.forward(x)
 
 
-def data_loaders(shuffle = True, batch_size = 100):
+def data_loaders(shuffle = True, batch_size = 100, shapley_values_for=None):
+    """
+    If you pass 'shapley_values_for', be sure, that the shapeley values are precomputed.
+    Only the test_loader, additionally equiped with the shapeley values for the choosen model will be returned.
+    """
     # Prepare Dataset
     # load data
     train = pd.read_csv(r"./dataset/kaggle_input/train.csv",dtype = np.float32)
@@ -175,14 +180,21 @@ def data_loaders(shuffle = True, batch_size = 100):
                                                                                 test_size = 0.2,
                                                                                 random_state = 42) 
 
-    # create feature and targets tensor for train set. As you remember we need variable to accumulate gradients. Therefore first we create tensor, then we will create variable
-    featuresTrain = torch.from_numpy(features_train)
-    targetsTrain = torch.from_numpy(targets_train).type(torch.LongTensor) # data type is long
-
     # create feature and targets tensor for test set.
     featuresTest = torch.from_numpy(features_test)
     targetsTest = torch.from_numpy(targets_test).type(torch.LongTensor) # data type is long
 
+    if shapley_values_for:
+        # return featuresTest
+        shapsTest = load_shaps(*shapley_values_for)
+        shapsTest = torch.from_numpy(shapsTest)
+        test = torch.utils.data.TensorDataset(featuresTest,targetsTest,shapsTest)
+        test_loader = torch.utils.data.DataLoader(test, batch_size = batch_size, shuffle = shuffle)
+        return test_loader
+
+    # create feature and targets tensor for train set. As you remember we need variable to accumulate gradients. Therefore first we create tensor, then we will create variable
+    featuresTrain = torch.from_numpy(features_train)
+    targetsTrain = torch.from_numpy(targets_train).type(torch.LongTensor) # data type is long
 
     # Pytorch train and test sets
     train = torch.utils.data.TensorDataset(featuresTrain,targetsTrain)
