@@ -2,6 +2,7 @@ import numpy as np
 
 device = "cpu"
 MNIST_CNN_PATH = './models/'
+PICKLE_PATH = './pickle/'
 data_dir = "./dataset"
 cat16_dir = data_dir + "/cat16"
 

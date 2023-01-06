@@ -194,9 +194,9 @@ def data_loaders(shuffle = True, batch_size = 100):
 
     return train_loader, test_loader
 
-def first_mnist_batch(batch_size = 100):
-    _, test_loader = data_loaders(shuffle = False, batch_size = batch_size)
-    for data, target in test_loader:
+def first_mnist_batch(batch_size = 100, test=True):
+    loaders = data_loaders(shuffle = False, batch_size = batch_size)
+    for data, target in loaders[int(test)]:
         return data, target
 
 
