@@ -7,3 +7,7 @@ dataset
 # on cluster only
 pickle/d3/shap__*
 pickle/d3_copy*
+
+# QSUB log and error files
+*.py.o
+*.py.e

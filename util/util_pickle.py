@@ -20,7 +20,7 @@ def load_data(model_tag, data_tag):
     return data_loaded
 
 def get_shap_configs(model_tag):
-    return np.unique([fn.split('__batch-')[0] for fn in tqdm(os.listdir(os.path.join(PICKLE_PATH, model_tag))) if 'shap' in fn])
+    return np.unique([fn.split('__batch-')[0] for fn in tqdm(os.listdir(os.path.join(PICKLE_PATH, model_tag))) if 'shap__background' in fn])
 
 def load_shaps(model_tag, config):
     shaps = []

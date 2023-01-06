@@ -161,7 +161,7 @@ class CNNModel(torch.nn.Module):
         return self.seq.forward(x)
 
 
-def data_loaders(shuffle = True, batch_size = 100, shapley_values_for=None):
+def data_loaders(shuffle = True, batch_size = 100, shapley_values_for=None, point_shape=(1, 28, 28)):
     """
     If you pass 'shapley_values_for', be sure, that the shapeley values are precomputed.
     Only the test_loader, additionally equiped with the shapeley values for the choosen model will be returned.
@@ -182,6 +182,7 @@ def data_loaders(shuffle = True, batch_size = 100, shapley_values_for=None):
 
     # create feature and targets tensor for test set.
     featuresTest = torch.from_numpy(features_test)
+    if point_shape: featuresTest = featuresTest.reshape((-1, *point_shape))
     targetsTest = torch.from_numpy(targets_test).type(torch.LongTensor) # data type is long
 
     if shapley_values_for:
@@ -194,6 +195,7 @@ def data_loaders(shuffle = True, batch_size = 100, shapley_values_for=None):
 
     # create feature and targets tensor for train set. As you remember we need variable to accumulate gradients. Therefore first we create tensor, then we will create variable
     featuresTrain = torch.from_numpy(features_train)
+    if point_shape: featuresTrain = featuresTrain.reshape((-1, *point_shape))
     targetsTrain = torch.from_numpy(targets_train).type(torch.LongTensor) # data type is long
 
     # Pytorch train and test sets
