@@ -22,8 +22,10 @@ from learning_lrp import train_lrp
 batch_size = 100
 lr = 0.02
 T = 1e6
-loss_func = 'shap--mse--pred'
-err_tags = ['shap--mse--pred', 'shap--corr--pred']
+loss_func = 'shap--pred--mse'
+err_tags = ['shap--pred--mse', 
+            'shap--pred--corr']
+shuffle = True
 
 ### PARALLELES ###
 
@@ -65,7 +67,7 @@ shap_config = 'shap__background_size-100__batch_size-10__model-cb1-8-8-8_cb2-16-
 model_dict = load_mnist_v4_models()
 model_d3 = model_dict[d3_tag]
 
-test_loader_shap = data_loaders(shapley_values_for=('d3', shap_config), shuffle=True, batch_size=batch_size)
+test_loader_shap = data_loaders(shapley_values_for=('d3', shap_config), shuffle=shuffle, batch_size=batch_size)
 
 # parameters and optimizer
 gamma_early = torch.Tensor([0.051]).requires_grad_(True)
@@ -81,9 +83,9 @@ model, gammas, gammas_t, errs, errs_t = train_lrp(
             model, test_loader_shap, optimizer, parameters,
             loss_func = loss_func, 
             err_tags = err_tags,
-            T = T, mode='no error')
+            T = T)
 
-tag = f"llrp__V2__model={d3_tag}__loss={loss_func}__lr={lr}__T={T:.0e}__backs={100}__batchs={batch_size}__shuffle"
+tag = f"llrp__V3__model={d3_tag}__loss={loss_func}__lr={lr}__T={T:.0e}__backs={100}__batchs={batch_size}__s{int(shuffle)}"
 data = (gammas, gammas_t, errs, errs_t, err_tags)
 save_data('d3', tag, data)
 print("Saved under tag=\n" + tag)

@@ -5,12 +5,18 @@
 #$ -t 1-38
 n_tasks = 38
 
-import sys
-sys.path.append("/home/johannes/Masterarbeit")
 import os
-i_task = int(os.environ['SGE_TASK_ID']) - 1
+import sys
 
-print(f"Task {i_task} of {n_tasks}...")
+if 'SGE_TASK_ID' in os.environ:
+    sys.path.append("/home/johannes/Masterarbeit")
+    i_task = int(os.environ['SGE_TASK_ID']) - 1
+    print(f"Task {i_task} of {n_tasks}.")
+    assert i_task < n_tasks
+else:
+    print("Running in non-parallel mode.")
+    i_task, n_tasks = 0, 1
+
 
 import torch
 from explanations_can_be_manipulated.src.nn.networks import ExplainableNet
@@ -21,7 +27,7 @@ from util.util_pickle import *
 from util.util_cnn import data_loaders, load_mnist_v4_models
 from learning_lrp import err_func_from_tag
 
-err_tags = ['shap--mae', 'shap--mse', 'shap--corr']
+err_tags = ['shap--pred--mae', 'shap--pred--mse', 'shap--pred--corr']
 batch_size = 100
 background_size = 100 # SHAP background size
 shap_config = f'shap__background_size-{background_size}__batch_size-10__model-cb1-8-8-8_cb2-16-16-16_seed-0'
@@ -44,7 +50,7 @@ n_steps = len(v)
 
 gammas = np.transpose([np.tile(v, len(v)), np.repeat(v, len(v))])
 
-if True: # multiple qsub tasks
+if n_tasks > 1: # multiple qsub tasks
     assert n_tasks == len(v)
     gammas = gammas.reshape((len(v), len(v), 2))
     gammas = gammas[i_task]

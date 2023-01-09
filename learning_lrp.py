@@ -9,24 +9,33 @@ from explanations_can_be_manipulated.src.nn.utils import get_expl
 
 method = ExplainingMethod.lrp
 
-def shap_error(model, test_loader_shap, distance='mse'):
-    if distance in ['mae']:
-        distance = lambda x, y: (x-y).abs()
-    if distance in ['mse']:
-        distance = lambda x, y: ((x-y)**2).mean()
-    if distance in ['corr', 'batch_corr_coef']: 
-        distance = lambda x, y: corr_coef_differentiable(x, y)
+def shap_error(model, test_loader_shap, distance_tags, other=False):
+    """
+    Compute mean error over test set.
+    """
+    distance_funcs = [distance_func_from_tag(tag) for tag in distance_tags]
 
-    distances = []
+    distances_per_batch = []
     with torch.no_grad():
-        for x, target, shap_per_class in test_loader_shap:
-            expl, output, class_idx = get_expl(model, x, method)
-            # find shapley value heatmaps for predicted classes
-            ground_truth = torch.Tensor(shap_per_class[np.arange(len(class_idx)), class_idx][:, 0])
-            d = distance(ground_truth, expl.reshape(ground_truth.shape))
-            if len(d.shape)>0: d = d.sum() / len(d) # take average
-            distances.append(d)
-    return np.mean(distances)
+        for x, _, shap_per_class in test_loader_shap:
+            # lrp heatmaps for predicted classes
+            expl_pred, output, class_idx = get_expl(model, x, method, full=True)
+            # shapley value heatmaps for predicted classes
+            shap_pred = torch.Tensor(shap_per_class[np.arange(len(class_idx)), class_idx][:, 0])
+
+            if not other:
+                expl, shap = expl_pred, shap_pred
+            else:
+                expl_other, _, _, other_idx = get_expl(model, x, method, desired_index='other', forward_result=(output, class_idx), full=True)
+                shap_other = torch.Tensor(shap_per_class[np.arange(len(other_idx)), other_idx][:, 0])
+
+                expl = torch.vstack((expl_pred, expl_other))
+                shap = torch.vstack((shap_pred, shap_other))
+
+            # calculate distance, take mean over batch
+            distances_for_batch = [f(shap, expl).mean() for f in distance_funcs]
+            distances_per_batch.append(distances_for_batch)
+    return np.mean(distances_per_batch, axis=0)
 
 def corr_coef_differentiable(x, y):
     """
@@ -51,19 +60,23 @@ def proj(gamma):
     with torch.no_grad():
         if gamma.data < 0: gamma.zero_()
 
-def err_func_from_tag(tag):
-    err_funcs_dict = {
-        'shap--mae--pred':  partial(shap_error, distance='mae'),
-        'shap--mse--pred':  partial(shap_error, distance='mse'),
-        'shap--corr--pred': partial(shap_error, distance='corr'),
-    }
-    return err_funcs_dict[tag]
+def distance_func_from_tag(tag):
+    if 'mae' in tag:
+        return lambda x, y: (x-y).abs()
+    if 'mse' in tag:
+        return lambda x, y: ((x-y)**2).mean()
+    if 'corr' in tag: 
+        return lambda x, y: corr_coef_differentiable(x, y)
+
+    raise 'Invalid distance tag: ' + tag
     
 def train_lrp(model, test_loader_shap, optimizer, parameters,
-            loss_func = 'shap prediction_only MAE', 
+            loss_func = 'shap--pred--mse', 
             T = 8e4,
-            err_tags = ['shap--mse--pred', 'shap--corr--pred'],
-            mode='normal'):
+            err_tags = ['shap--pred--mae', 
+                        'shap--pred--mse', 
+                        'shap--pred--corr'],
+            ):
 
     # prework
     batch_size = len(next(iter(test_loader_shap))[0]) # look how long first batch is
@@ -71,20 +84,23 @@ def train_lrp(model, test_loader_shap, optimizer, parameters,
     n_epochs = int(T / n_batches / batch_size)
     if T < n_epochs * n_batches * batch_size: n_epochs += 1
     print('n_epochs', n_epochs)
-    err_funcs = [err_func_from_tag(err_tag) for err_tag in err_tags]
+    err_tags_shap = [tag for tag in err_tags if 'shap--' in tag]
+    err_func = partial(shap_error, distances=err_tags_shap)
 
     # to save state
     gammas, gammas_t = [], []
     errs, errs_t = [], []
     
     def log_err():
-        nonlocal model, test_loader_shap, errs, parameters, mode
-        if mode=='no errors': return
+        nonlocal model, test_loader_shap, errs, parameters
+        print(f"{c_samples}/{T}. Params: {[round(float(param.detach()), 4) for param in parameters]}.")
+        if not err_tags: return
+
         # evaluate for all passed error functions
-        errors = [func(model, test_loader_shap) for func in err_funcs]
+        errors = err_func(model, test_loader_shap)
         errs.append(errors)
         errs_t.append(c_samples)
-        print(f"{c_samples}/{T}. Params: {[round(float(param.detach()), 4) for param in parameters]}. Metrics: {np.array(errors).round(8)}")
+        print(f"Metrics: {np.array(errors).round(8)}")
 
     # initial state
     c_samples = 0
@@ -97,7 +113,7 @@ def train_lrp(model, test_loader_shap, optimizer, parameters,
             optimizer.zero_grad()
 
             # calculate entropy loss
-            expl, output, class_idx = get_expl(model, x, method)
+            expl, output, class_idx = get_expl(model, x, method, full=True)
 
             # construct 'probability distribution'
             if loss_func=='entropy':
@@ -115,9 +131,9 @@ def train_lrp(model, test_loader_shap, optimizer, parameters,
                 ground_truth = shap_per_class[np.arange(batch_size), class_idx][:, 0]
                 ground_truth = torch.Tensor(ground_truth)
 
-                if 'shap--pred-contrastive' in loss_func:
+                if 'shap--pred-contrastive' in loss_func: # TODO finish
                     # compute lrp heatmaps for *other* classes
-                    expl_other, _, _, class_idx_other = get_expl(model, x, method, desired_index='other', forward_result=(output, class_idx))
+                    expl_other, _, _, class_idx_other = get_expl(model, x, method, desired_index='other', forward_result=(output, class_idx), full=True)
                     # find shapley value heatmaps for *other* classes
                     shap_other = shap_per_class[np.arange(batch_size), class_idx_other][:, 0]
                     
