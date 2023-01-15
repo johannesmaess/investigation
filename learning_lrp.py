@@ -62,11 +62,12 @@ def corr_coef_differentiable(x, y):
     if batched: return corr.mean()
     else:       return corr
 
-def proj(gamma):
-    with torch.no_grad():
-        if gamma.data < 0: gamma.zero_()
-
 def metric_func_from_tag(tag):
+    """
+    'tag' is a string that identifies the desired metric function.
+    Ex: "mse abs-norm"
+    """
+
     # set normalization function
     if 'abs-norm' in tag:
         def n(z):
@@ -89,6 +90,10 @@ def metric_func_from_tag(tag):
         return lambda x, y: 1 - corr_coef_differentiable(n(x), n(y))
 
     raise 'Invalid metric tag: ' + tag
+
+def proj(gamma):
+    with torch.no_grad():
+        if gamma.data < 0: gamma.zero_()
     
 def train_lrp(model, test_loader_shap, optimizer, parameters,
             loss_tag = 'shap--pred--mse', 
@@ -134,10 +139,9 @@ def train_lrp(model, test_loader_shap, optimizer, parameters,
             x = x.reshape((batch_size, 1, 28, 28)).data
             expl_pred, output, class_idx = get_expl(model, x, method, full=True)
 
-            # construct 'probability distribution'
-            if loss_tag=='entropy':
-                print(expl.view(-1)[:10])
-                dist = expl.abs()
+            if loss_tag=='entropy': # TODO haven't used this in a long time, not sure if it works.
+                # construct 'probability distribution'
+                dist = expl_pred.abs()
                 dist /= dist.sum((1,2), keepdim=True)
                 ent = torch.special.entr(dist)
                 print(ent)
@@ -147,7 +151,7 @@ def train_lrp(model, test_loader_shap, optimizer, parameters,
                 # find shapley value heatmaps for predicted classes
                 shap_pred = torch.Tensor(shap_per_class[np.arange(batch_size), class_idx][:, 0])
 
-                if 'other' in loss_tag or 'both' in loss_tag: # TODO finish
+                if 'other' in loss_tag or 'both' in loss_tag:
                     # compute lrp heatmaps for *other* classes
                     expl_other, _, _, class_idx_other = get_expl(model, x, method, desired_index='other', forward_result=(output, class_idx), full=True)
                     # find shapley value heatmaps for *other* classes
@@ -160,6 +164,15 @@ def train_lrp(model, test_loader_shap, optimizer, parameters,
                 if 'pred'    in loss_tag: loss = f(shap_pred,  expl_pred ).sum()
                 elif 'other' in loss_tag: loss = f(shap_other, expl_other).sum()
                 elif 'both'  in loss_tag: loss = f(shap_both,  expl_both ).sum()
+
+            elif 'self' in loss_tag:
+                # Self-supervised learning of LRP parameters. 
+                # For the loss function, only the qualities of (a related set of) heatmaps is used to improve the heatmaps.
+
+                f = metric_func_from_tag(loss_tag)
+                x_noisy = 
+                
+                
                 
             # update gammas
             loss.backward()

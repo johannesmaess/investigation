@@ -107,6 +107,8 @@ def compute_relevancies(mode, layers, A, output_rels='correct class', target=Non
                             helper_layer = copy.deepcopy(layers_conv_as_mat[l]) # todo: in the notebook I used a precomputation "layers_conv_as_mat"
                             helper_layer.set_gamma(curr_gamma)
 
+            print(l, layers[l])
+
             incr = lambda z: z+1e-9
             z = incr(helper_layer.forward(A[l]))                            # step 1
             s = (R[l+1]/z).data                                             # step 2
