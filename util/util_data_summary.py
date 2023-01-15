@@ -123,3 +123,140 @@ def distribution_plot(vals, gammas, mode='hist', cutoff = 1e-2, aggregate_over=N
     plt.subplots_adjust(wspace=0.1, hspace=0.16) 
     plt.show()
 
+
+
+### Visualization of LRP Gridsearch results
+def gridlrp_load_results(batch_tags):
+    # load data
+    loaded = [load_data('d3', tag) for tag in tqdm(batch_tags)]
+    gs = np.vstack([gs for gs, _, _ in loaded])
+    es = np.vstack([es for _, es, _ in loaded])
+    es_tag = loaded[0][2]
+
+    # order by second, then first column:
+    order = np.argsort(gs[:, 1] + gs[:, 0] * 1e-4)
+    gs_ordered = gs[order]
+    es_ordered = es[order]
+    # check order 
+    increasing_or_0 = np.diff(gs_ordered, axis=0) >= 0
+    increasing_or_0[gs_ordered[1:] == 0] = True
+    assert np.all(increasing_or_0)
+    
+    return gs_ordered, es_ordered, es_tag
+
+def gridlrp_print_best_and_worst(es, es_tag):
+    for i, tag in enumerate(es_tag):
+        best_idx, worst_idx = np.argmax(-es_ordered[:, i]), np.argmin(-es_ordered[:, i])
+        gs_best, e_best = gs_ordered[best_idx], es_ordered[best_idx, i]
+        gs_worst, e_worst = gs_ordered[worst_idx], es_ordered[worst_idx, i]
+        print(f'{tag}')
+        print('\tBest\t', gs_best, e_best)
+        print('\tWorst\t', gs_worst, e_worst)
+
+def gridlrp_plot_metric_terrain(gs, e_flat, e_tag, ax, log=False, ylim=None, xlim=None, n_contours=11):
+    if log:
+        # filter out 0s
+        mask = np.logical_not(np.any(gs == 0, axis=1))
+        gs = gs[mask]
+        e_flat = e_flat[mask]
+
+    g1s, g2s = np.unique(gs[:, 0]), np.unique(gs[:, 1])
+    
+    e = e_flat.reshape((len(g2s), len(g1s)))
+    plt.colorbar(ax.pcolormesh(g1s, g2s, e), ax=ax)
+    if n_contours:
+        levels = np.quantile(e, np.linspace(0, 1, n_contours))
+        ax.contour(g1s, g2s, e, levels=levels, cmap='Greys')
+
+    best_idx, worst_idx = np.argmin(e_flat), np.argmax(e_flat)
+    gs_best,  e_best  = gs[best_idx],  e_flat[best_idx]
+    gs_worst, e_worst = gs[worst_idx], e_flat[worst_idx]
+    ax.plot(*gs_best,  marker='o', ms=15, c='g')
+    ax.plot(*gs_worst, marker='o', ms=15, c='r')
+    
+    ax.set_aspect('equal')
+    ax.set_xlabel('gamma early')
+    ax.set_ylabel('gamma late')
+    if log:
+        ax.set_yscale('log')
+        ax.set_xscale('log')
+    if xlim is None: xlim = g1s.min(), g1s.max()
+    if ylim is None: ylim = g2s.min(), g2s.max()
+    ax.set_xlim(*xlim)
+    ax.set_ylim(*ylim)
+    ax.set_title(e_tag)
+
+
+def gridlrp_plot_metric_surface(gs, e_flat, e_tag, ax):
+
+    g1s, g2s = np.unique(gs[:, 0]), np.unique(gs[:, 1])
+
+    e = e_flat.reshape((len(g2s), len(g1s)))
+    # plt.colorbar(ax.pcolormesh(g2s, g1s, e.T))
+    
+    g2s_tick = np.arange(len(g2s))
+    g1s_tick = np.arange(len(g1s))
+    
+    x = np.outer(g2s_tick, np.ones_like(g1s))
+    y = np.outer(g1s_tick, np.ones_like(g2s)).T
+    
+    ax.plot_surface(x, y, e.T, cmap=cm.coolwarm,
+                    linewidth=0, antialiased=False)
+    ax.set_title(e_tag)
+    
+    ax.set_aspect('equal')
+    ax.set_ylabel('gamma early')
+    ax.set_xlabel('gamma late')
+    
+    plot_every=3
+    ax.set_yticks(g2s_tick[::plot_every])
+    ax.set_yticklabels(g2s[::plot_every].round(2))
+    ax.set_xticks(g1s_tick[::plot_every])
+    ax.set_xticklabels(g1s[::plot_every].round(2))
+    
+    ax.set_zlim(e.min(), e.max())
+    ax.set_zscale('log')
+
+def gridlrp_plot_metric_terrain_for_tags(batch_tags, log=False, in_3d=False):
+    if in_3d: print("Warn: I didn't test the 3d surface plot implementation yet.") # TODO test the 3d surface plot implementation
+
+    gs, es, es_tag = gridlrp_load_results(batch_tags=batch_tags)
+
+    n, m = 1, len(es_tag)
+    if m%3==0: n, m = 3, int(m/3)
+    fig, axs = plt.subplots(m, n, figsize=(n*6, m*6+2), subplot_kw=({}, {"projection": "3d"})[in_3d])
+    axs = np.array(axs).flatten()
+
+    for e_flat, e_tag, ax in zip(es.T, es_tag, axs):
+        if in_3d: gridlrp_plot_metric_surface(gs, e_flat, e_tag, ax, log=log)
+        else:     gridlrp_plot_metric_terrain(gs, e_flat, e_tag, ax, log=log)
+
+    axs[1].set_title(f"Terrain of {len(axs)} metrics. Lower (blue) is better. \n\n\n" + axs[1].get_title());
+
+
+### Visualization of LLRP results (learning LRP by gradient descent)
+
+def llrp_plot_training_for_tags(llrp_tags):
+    n_lines_per_plot = 9
+
+    n_cols = 1 + len(load_data('d3', llrp_tags[0])[4])
+    n_cols = 1 + int(len(load_data('d3', llrp_tags[0])[4]) / n_lines_per_plot)
+    n_rows = len(llrp_tags)
+    fig, axs = plt.subplots(n_rows, n_cols, figsize=(6*n_cols, 5*n_rows))
+
+    for tag, axs_row in zip(llrp_tags, axs):
+        gs, gs_t, es, es_t, es_tag = load_data('d3', tag)
+
+        axs_row[0].plot(gs_t, gs)
+        axs_row[0].set_title(tag[58:])
+
+        for i, ax in enumerate(axs_row):
+            if i==0: continue
+            ax.sharey(axs[0][i])
+
+        for i, (e, e_tag) in enumerate(zip(np.array(es).T, es_tag)):
+            ax = axs_row[1 + int(i/n_lines_per_plot)]
+            ax.plot(es_t, e, label=e_tag)
+            ax.legend()
+
+    plt.show()

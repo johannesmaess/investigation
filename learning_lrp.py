@@ -9,13 +9,14 @@ from explanations_can_be_manipulated.src.nn.utils import get_expl
 
 method = ExplainingMethod.lrp
 
-def shap_error(model, test_loader_shap, distance_tags, other=False):
+def shap_error(model, test_loader_shap, metric_tags):
     """
     Compute mean error over test set.
     """
-    distance_funcs = [distance_func_from_tag(tag) for tag in distance_tags]
+    metric_funcs = [metric_func_from_tag(tag) for tag in metric_tags]
+    compute_other = np.any([('other' in tag or 'both' in tag) for tag in metric_tags])
 
-    distances_per_batch = []
+    metrics_per_batch = []
     with torch.no_grad():
         for x, _, shap_per_class in test_loader_shap:
             # lrp heatmaps for predicted classes
@@ -23,19 +24,24 @@ def shap_error(model, test_loader_shap, distance_tags, other=False):
             # shapley value heatmaps for predicted classes
             shap_pred = torch.Tensor(shap_per_class[np.arange(len(class_idx)), class_idx][:, 0])
 
-            if not other:
-                expl, shap = expl_pred, shap_pred
-            else:
+            if compute_other:
                 expl_other, _, _, other_idx = get_expl(model, x, method, desired_index='other', forward_result=(output, class_idx), full=True)
                 shap_other = torch.Tensor(shap_per_class[np.arange(len(other_idx)), other_idx][:, 0])
 
-                expl = torch.vstack((expl_pred, expl_other))
-                shap = torch.vstack((shap_pred, shap_other))
+                expl_both = torch.vstack((expl_pred, expl_other))
+                shap_both = torch.vstack((shap_pred, shap_other))
 
-            # calculate distance, take mean over batch
-            distances_for_batch = [f(shap, expl).mean() for f in distance_funcs]
-            distances_per_batch.append(distances_for_batch)
-    return np.mean(distances_per_batch, axis=0)
+            # calculate metric, take mean over batch
+            metrics_for_batch = []
+            for f, tag in zip(metric_funcs, metric_tags):
+                if 'pred'    in tag: m = f(shap_pred,  expl_pred )
+                elif 'other' in tag: m = f(shap_other, expl_other)
+                elif 'both'  in tag: m = f(shap_both,  expl_both )
+                metrics_for_batch.append(m.mean())
+            metrics_per_batch.append(metrics_for_batch)
+
+            break
+    return np.mean(metrics_per_batch, axis=0)
 
 def corr_coef_differentiable(x, y):
     """
@@ -44,10 +50,10 @@ def corr_coef_differentiable(x, y):
     We calculate the Correlation per point-pair in the batches, and return their Mean.
     """
     
-    if len(x.shape) >= 2: x = x.view((len(x), -1))
-    if len(y.shape) >= 2: y = y.view((len(y), -1))
+    if x.ndim > 2: x = x.view((len(x), -1))
+    if y.ndim > 2: y = y.view((len(y), -1))
     assert x.shape == y.shape
-    batched = int(len(x.shape) == 2)
+    batched = int(x.ndim == 2)
     
     vx = x - torch.mean(x)
     vy = y - torch.mean(y)
@@ -60,32 +66,46 @@ def proj(gamma):
     with torch.no_grad():
         if gamma.data < 0: gamma.zero_()
 
-def distance_func_from_tag(tag):
-    if 'mae' in tag:
-        return lambda x, y: (x-y).abs()
-    if 'mse' in tag:
-        return lambda x, y: ((x-y)**2).mean()
-    if 'corr' in tag: 
-        return lambda x, y: corr_coef_differentiable(x, y)
+def metric_func_from_tag(tag):
+    # set normalization function
+    if 'abs-norm' in tag:
+        def n(z):
+            z = z.view((len(z), -1)).abs()
+            return z / z.sum(axis=1, keepdim=True)
+    elif 'norm' in tag:
+        def n(z):
+            z = z.view((len(z), -1))
+            return z / z.sum(axis=1, keepdim=True)
+    else:
+        # no normalization
+        n = lambda z: z
 
-    raise 'Invalid distance tag: ' + tag
+    # set metric function (composed with normalization function)
+    if 'mae' in tag:
+        return lambda x, y: (n(x)-n(y)).abs()
+    if 'mse' in tag:
+        return lambda x, y: ((n(x)-n(y))**2).mean()
+    if 'corr' in tag: 
+        return lambda x, y: 1 - corr_coef_differentiable(n(x), n(y))
+
+    raise 'Invalid metric tag: ' + tag
     
 def train_lrp(model, test_loader_shap, optimizer, parameters,
-            loss_func = 'shap--pred--mse', 
+            loss_tag = 'shap--pred--mse', 
             T = 8e4,
-            err_tags = ['shap--pred--mae', 
-                        'shap--pred--mse', 
-                        'shap--pred--corr'],
+            metric_tags = ['shap--pred--mae', 
+                           'shap--pred--mse', 
+                           'shap--pred--corr'],
             ):
 
     # prework
     batch_size = len(next(iter(test_loader_shap))[0]) # look how long first batch is
     n_batches = len(test_loader_shap)
     n_epochs = int(T / n_batches / batch_size)
-    if T < n_epochs * n_batches * batch_size: n_epochs += 1
+    if T > n_epochs * n_batches * batch_size: n_epochs += 1
     print('n_epochs', n_epochs)
-    err_tags_shap = [tag for tag in err_tags if 'shap--' in tag]
-    err_func = partial(shap_error, distances=err_tags_shap)
+    metric_tags_shap = [tag for tag in metric_tags if 'shap--' in tag]
+    err_func = partial(shap_error, metric_tags=metric_tags_shap)
 
     # to save state
     gammas, gammas_t = [], []
@@ -94,7 +114,7 @@ def train_lrp(model, test_loader_shap, optimizer, parameters,
     def log_err():
         nonlocal model, test_loader_shap, errs, parameters
         print(f"{c_samples}/{T}. Params: {[round(float(param.detach()), 4) for param in parameters]}.")
-        if not err_tags: return
+        if not metric_tags: return
 
         # evaluate for all passed error functions
         errors = err_func(model, test_loader_shap)
@@ -108,15 +128,14 @@ def train_lrp(model, test_loader_shap, optimizer, parameters,
 
     for i in tqdm(range(n_epochs)):
         for j, (x, target, shap_per_class) in (enumerate(test_loader_shap)):
-            x = x.reshape((batch_size, 1, 28, 28)).data
-
             optimizer.zero_grad()
 
-            # calculate entropy loss
-            expl, output, class_idx = get_expl(model, x, method, full=True)
+            # calculate explanation of predicted class
+            x = x.reshape((batch_size, 1, 28, 28)).data
+            expl_pred, output, class_idx = get_expl(model, x, method, full=True)
 
             # construct 'probability distribution'
-            if loss_func=='entropy':
+            if loss_tag=='entropy':
                 print(expl.view(-1)[:10])
                 dist = expl.abs()
                 dist /= dist.sum((1,2), keepdim=True)
@@ -124,36 +143,23 @@ def train_lrp(model, test_loader_shap, optimizer, parameters,
                 print(ent)
                 loss = ent.sum()
                 
-            elif 'shap--' in loss_func:
-                assert 'shap--pred' in loss_func, 'Invalid loss_func: ' + loss_func
-
+            elif 'shap' in loss_tag:
                 # find shapley value heatmaps for predicted classes
-                ground_truth = shap_per_class[np.arange(batch_size), class_idx][:, 0]
-                ground_truth = torch.Tensor(ground_truth)
+                shap_pred = torch.Tensor(shap_per_class[np.arange(batch_size), class_idx][:, 0])
 
-                if 'shap--pred-contrastive' in loss_func: # TODO finish
+                if 'other' in loss_tag or 'both' in loss_tag: # TODO finish
                     # compute lrp heatmaps for *other* classes
                     expl_other, _, _, class_idx_other = get_expl(model, x, method, desired_index='other', forward_result=(output, class_idx), full=True)
                     # find shapley value heatmaps for *other* classes
-                    shap_other = shap_per_class[np.arange(batch_size), class_idx_other][:, 0]
-                    
-                    # extract float that follows '-contrastive'
-                    weight = loss_func.split('-contrastive')[1].split('-')[0]
+                    shap_other = torch.Tensor(shap_per_class[np.arange(batch_size), class_idx_other][:, 0])
                 
+                    expl_both = torch.vstack((expl_pred, expl_other))
+                    shap_both = torch.vstack((shap_pred, shap_other))
                 
-                # normalize per heatmap
-                if 'normalize' in loss_func:
-                    expl = expl / expl.abs().sum(axis=(1,2), keepdim=True)
-                    ground_truth = ground_truth / ground_truth.abs().sum(axis=(1,2), keepdim=True)
-                
-                if 'mse' in loss_func:
-                    loss = ((ground_truth - expl)**2).sum()  
-                elif 'mae' in loss_func:
-                    loss = (ground_truth - expl).abs().sum()
-                elif 'corr' in loss_func:
-                    loss = corr_coef_differentiable(ground_truth.view(-1), expl.view(-1))
-                else:
-                    raise 'Invalid loss_func: ' + loss_func
+                f = metric_func_from_tag(loss_tag)
+                if 'pred'    in loss_tag: loss = f(shap_pred,  expl_pred ).sum()
+                elif 'other' in loss_tag: loss = f(shap_other, expl_other).sum()
+                elif 'both'  in loss_tag: loss = f(shap_both,  expl_both ).sum()
                 
             # update gammas
             loss.backward()
@@ -163,13 +169,6 @@ def train_lrp(model, test_loader_shap, optimizer, parameters,
             
             gammas.append([float(param.detach()) for param in parameters])
             gammas_t.append(c_samples)
-                
-            if 0:
-                clear_output()
-                fig, ax = plt.subplots()
-                ax.plot(gammas)
-                ax.twinx().plot(losses, c='r')
-                plt.plot()
                 
             c_samples += batch_size
             if c_samples > T: break
