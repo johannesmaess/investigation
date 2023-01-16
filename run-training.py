@@ -30,12 +30,12 @@ batch_size = 100
 lr = 0.02
 T = 1e6
 loss_tag = 'shap--pred--mse'
-metric_tags = all_metric_tags
+metric_tags = all_shap_metric_tags
 shuffle = True
 
 ### PARALLELES ###
 
-loss_tags = [tag for tag in all_metric_tags if 'corr' in tag or 'abs-norm' in tag]
+loss_tags = [tag for tag in all_shap_metric_tags if 'corr' in tag or 'abs-norm' in tag]
 lr_T_list =[
     (.001, 1e6),
     (.002, 1e6),

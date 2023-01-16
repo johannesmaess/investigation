@@ -15,8 +15,8 @@ gammas_0_1_21_inf = list(np.linspace(0,1,21).round(3)) + ['inf']
 
 d3_after_conv_layer = [3, 5, 8, 10, 12, 16]
 
-all_metric_tags = []
+all_shap_metric_tags = []
 for d in ['mae', 'mse', 'corr']:
     for n in ['', 'norm', 'abs-norm']:
         for which in ['pred', 'other', 'both'][:]:
-            all_metric_tags.append(f"shap--{d}--{n}--{which}")
+            all_shap_metric_tags.append(f"shap--{d}--{n}--{which}")

@@ -9,9 +9,30 @@ from explanations_can_be_manipulated.src.nn.utils import get_expl
 
 method = ExplainingMethod.lrp
 
-def shap_error(model, test_loader_shap, metric_tags):
+def perturb_point(point, k=1, mode='normal', var=.5, clip=[0,1], activated_subnetwork=True, seed=1):
+    with torch.no_grad():
+        torch.manual_seed(seed)
+        
+        if 'normal' in mode:
+            perturbation = torch.normal(0, var, size=(k, *point.shape))
+
+        if activated_subnetwork:
+            perturbation *= point[None] > 0
+        
+        point_perturbed = point[None] + perturbation
+        
+        if clip is not None:
+            if clip[0] is not None:   point_perturbed = point_perturbed.clip(min=clip[0])
+            if clip[1] is not None:   point_perturbed = point_perturbed.clip(max=clip[1])
+        
+        if k==1: point_perturbed = point_perturbed[0]
+        
+    point_perturbed.requires_grad_(point.requires_grad)
+    return point_perturbed
+
+def metrics_shap(model, test_loader_shap, metric_tags):
     """
-    Compute mean error over test set.
+    Compute mean over test set, for a set of shapley value metric functions.
     """
     metric_funcs = [metric_func_from_tag(tag) for tag in metric_tags]
     compute_other = np.any([('other' in tag or 'both' in tag) for tag in metric_tags])
@@ -25,7 +46,7 @@ def shap_error(model, test_loader_shap, metric_tags):
             shap_pred = torch.Tensor(shap_per_class[np.arange(len(class_idx)), class_idx][:, 0])
 
             if compute_other:
-                expl_other, _, _, other_idx = get_expl(model, x, method, desired_index='other', forward_result=(output, class_idx), full=True)
+                expl_other, _, _, other_idx = get_expl(model, x, method, desired_index='other', forward_result=output, full=True)
                 shap_other = torch.Tensor(shap_per_class[np.arange(len(other_idx)), other_idx][:, 0])
 
                 expl_both = torch.vstack((expl_pred, expl_other))
@@ -37,11 +58,53 @@ def shap_error(model, test_loader_shap, metric_tags):
                 if 'pred'    in tag: m = f(shap_pred,  expl_pred )
                 elif 'other' in tag: m = f(shap_other, expl_other)
                 elif 'both'  in tag: m = f(shap_both,  expl_both )
+                
+                if 'corr' in tag: m *= -1 # we want optimization=minimization
+                metrics_for_batch.append(m.mean())
+            metrics_per_batch.append(metrics_for_batch)
+    return np.mean(metrics_per_batch, axis=0)
+
+def metrics_self(model, test_loader, metric_tags):
+    """
+    Compute mean over test set, for a set of self-supervised metrics.
+    """
+    metric_funcs = [metric_func_from_tag(tag) for tag in metric_tags]
+
+    compute_other = np.any([('-sensitivity' in tag) for tag in metric_tags])
+    compute_perturbation = np.any([('perturb' in tag) for tag in metric_tags])
+
+    metrics_per_batch = []
+    with torch.no_grad():
+        for batch in test_loader:
+            x = batch[0]
+            # lrp heatmaps for predicted classes
+            expl_pred, output, class_idx = get_expl(model, x, method, full=True, R='one')
+
+            if compute_other:
+                expl_other, _, _, other_idx = get_expl(model, x, method, full=True, R='one', desired_index='other', forward_result=output)
+
+            if compute_perturbation:
+                x_perturbed = perturb_point(x)
+                expl_perturbed_pred, output_perturbed, _, _ = get_expl(model, x_perturbed, method, full=True, R='one', desired_index=class_idx)
+                if compute_other:
+                    expl_perturbed_other, _, _, _ =        get_expl(model, x_perturbed, method, full=True, R='one', desired_index=other_idx, forward_result=output_perturbed)
+
+            # print(class_idx)
+            # print(other_idx)
+
+            # calculate metric, take mean over batch
+            metrics_for_batch = []
+            for f, tag in zip(metric_funcs, metric_tags):
+                if 'pred-perturbation-insensitivity' in tag: m = f(expl_pred, expl_perturbed_pred).sum()
+                elif        'pred-class-sensitivity' in tag: m = f(expl_pred, expl_other).sum()
+                elif   'perturbed-class-sensitivity' in tag: m = f(expl_perturbed_pred, expl_perturbed_other).sum()
+
                 metrics_for_batch.append(m.mean())
             metrics_per_batch.append(metrics_for_batch)
 
-            break
     return np.mean(metrics_per_batch, axis=0)
+
+
 
 def corr_coef_differentiable(x, y):
     """
@@ -83,11 +146,11 @@ def metric_func_from_tag(tag):
 
     # set metric function (composed with normalization function)
     if 'mae' in tag:
-        return lambda x, y: (n(x)-n(y)).abs()
+        return lambda x, y: (n(x)-n(y)).abs().mean()
     if 'mse' in tag:
         return lambda x, y: ((n(x)-n(y))**2).mean()
     if 'corr' in tag: 
-        return lambda x, y: 1 - corr_coef_differentiable(n(x), n(y))
+        return lambda x, y: corr_coef_differentiable(n(x), n(y))
 
     raise 'Invalid metric tag: ' + tag
 
@@ -110,7 +173,7 @@ def train_lrp(model, test_loader_shap, optimizer, parameters,
     if T > n_epochs * n_batches * batch_size: n_epochs += 1
     print('n_epochs', n_epochs)
     metric_tags_shap = [tag for tag in metric_tags if 'shap--' in tag]
-    err_func = partial(shap_error, metric_tags=metric_tags_shap)
+    err_func = partial(metrics_shap, metric_tags=metric_tags_shap)
 
     # to save state
     gammas, gammas_t = [], []
@@ -153,7 +216,7 @@ def train_lrp(model, test_loader_shap, optimizer, parameters,
 
                 if 'other' in loss_tag or 'both' in loss_tag:
                     # compute lrp heatmaps for *other* classes
-                    expl_other, _, _, class_idx_other = get_expl(model, x, method, desired_index='other', forward_result=(output, class_idx), full=True)
+                    expl_other, _, _, class_idx_other = get_expl(model, x, method, desired_index='other', forward_result=output, full=True)
                     # find shapley value heatmaps for *other* classes
                     shap_other = torch.Tensor(shap_per_class[np.arange(batch_size), class_idx_other][:, 0])
                 
@@ -170,8 +233,25 @@ def train_lrp(model, test_loader_shap, optimizer, parameters,
                 # For the loss function, only the qualities of (a related set of) heatmaps is used to improve the heatmaps.
 
                 f = metric_func_from_tag(loss_tag)
-                x_noisy = 
+                loss = 0
+
+                if 'perturb' in loss_tag: # precompute for loss functions that use perturbed point
+                    x_perturbed = perturb_point(x)
+                    expl_perturbed_pred, output_perturbed, _ = get_expl(model, x_perturbed, method, full=True, desired_index=class_idx)
                 
+                get_float_after = lambda s: float(loss_tag.split(s)[1].split(',')[0])
+
+                if 'pred-perturbation-insensitivity' in loss_tag:
+                    weighting = get_float_after('pred-perturbation-insensitivity=')
+                    loss += weighting * f(expl_pred, expl_perturbed_pred).sum()
+                if 'pred-class-sensitivity' in loss_tag:
+                    weighting = get_float_after('pred-class-sensitivity=')
+                    expl_other, _, _, _ = get_expl(model, x, method, desired_index='other', forward_result=output, full=True)
+                    loss -= weighting * f(expl_pred, expl_other)
+                if 'perturbed-class-sensitivity' in loss_tag:
+                    weighting = get_float_after('perturbed-class-sensitivity=')
+                    expl_perturbed_other, _, _, _ = get_expl(model, x_perturbed, method, desired_index='other', forward_result=output_perturbed, full=True)
+                    loss -= weighting * f(expl_perturbed_pred, expl_perturbed_other)
                 
                 
             # update gammas
