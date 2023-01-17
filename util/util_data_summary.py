@@ -3,6 +3,8 @@ import torch
 import matplotlib.pyplot as plt
 import seaborn as sns
 from mpl_toolkits.axes_grid1 import make_axes_locatable
+from tqdm import tqdm
+from util.util_pickle import load_data
 
 def percentile(n):
     def percentile_(x):
@@ -126,21 +128,26 @@ def distribution_plot(vals, gammas, mode='hist', cutoff = 1e-2, aggregate_over=N
 
 
 ### Visualization of LRP Gridsearch results
-def gridlrp_load_results(batch_tags):
+def gridlrp_load_results(batch_tags, e_tag_filter=''):
     # load data
     loaded = [load_data('d3', tag) for tag in tqdm(batch_tags)]
     gs = np.vstack([gs for gs, _, _ in loaded])
     es = np.vstack([es for _, es, _ in loaded])
-    es_tag = loaded[0][2]
+    es_tag = np.array(loaded[0][2])
 
     # order by second, then first column:
-    order = np.argsort(gs[:, 1] + gs[:, 0] * 1e-4)
+    order = np.argsort(gs[:, 1] * 1e4 + gs[:, 0] * 1e-4)
     gs_ordered = gs[order]
     es_ordered = es[order]
     # check order 
     increasing_or_0 = np.diff(gs_ordered, axis=0) >= 0
     increasing_or_0[gs_ordered[1:] == 0] = True
     assert np.all(increasing_or_0)
+    
+    if e_tag_filter:
+        mask = np.array([e_tag_filter in tag for tag in es_tag])
+        es_ordered = es_ordered[:, mask]
+        es_tag = es_tag[mask]
     
     return gs_ordered, es_ordered, es_tag
 
@@ -217,10 +224,10 @@ def gridlrp_plot_metric_surface(gs, e_flat, e_tag, ax):
     ax.set_zlim(e.min(), e.max())
     ax.set_zscale('log')
 
-def gridlrp_plot_metric_terrain_for_tags(batch_tags, log=False, in_3d=False):
+def gridlrp_plot_metric_terrain_for_tags(batch_tags, log=False, in_3d=False, e_tag_filter=''):
     if in_3d: print("Warn: I didn't test the 3d surface plot implementation yet.") # TODO test the 3d surface plot implementation
 
-    gs, es, es_tag = gridlrp_load_results(batch_tags=batch_tags)
+    gs, es, es_tag = gridlrp_load_results(batch_tags=batch_tags, e_tag_filter=e_tag_filter)
 
     n, m = 1, len(es_tag)
     if m%3==0: n, m = 3, int(m/3)

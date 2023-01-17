@@ -2,8 +2,8 @@
 #$ -q all.q
 #$ -cwd
 #$ -V
-#$ -t 1-81
-n_tasks = 81
+#$ -t 1-64
+n_tasks = 64
 
 ### Configure on local / Qsub system ###
 import os
@@ -29,17 +29,19 @@ from util.util_pickle import *
 from util.util_cnn import data_loaders, load_mnist_v4_models
 from learning_lrp import metrics_shap, metrics_self
 
+### Config ###
+
 batch_size = 100
 
 # parameters
-if False: # large parameter space, part of it is covered in log-scale.
-    n_steps = 32
-    mini, maxi = 0.1, 20
+if True: # large parameter space, part of it is covered in log-scale.
+    n_steps = 50
+    mini, maxi = 0.1, 80
 
     exp = (maxi/mini)**(1/(n_steps-1))
     v = mini * exp**np.arange(n_steps)
 
-    v = np.concatenate((np.linspace(0, mini, 9)[:-1], v))
+    v = np.concatenate((np.linspace(0, mini, 15)[:-1], v))
 
 else: # small parameter space [0, 1]. covered in a linear grid.
     maxi=1
@@ -80,7 +82,7 @@ gammas = np.transpose([np.tile(v, len(v)), np.repeat(v, len(v))])
 if n_tasks > 1 and len(gammas) % n_tasks == 0: # multiple qsub tasks
     gammas = gammas.reshape((n_tasks, -1, 2))
     gammas = gammas[i_task]
-    print(f"Running {len(gammas)} gammas.")
+    print(f"Running {len(gammas)} gammas on task {i_task}.")
 else:
     print(f"Cant run multiple threads with {len(gammas)} n_gammas, {n_tasks} n_tasks.")
     if i_task > 0: 
