@@ -335,7 +335,7 @@ def calc_vals(M, num_vals, return_vecs=False, svd_mode=True, abs_vals=False):
         if not svd_mode: vals, vecs    = eig(M)
         else:            vecs, vals, _ = svd(M, full_matrices=False)
     else:
-        raise f"Invalid type {type(M)}"
+        raise Exception(f"Invalid type {type(M)}")
 
     vals = np.array(vals)
     if abs_vals: vals = np.abs(vals)

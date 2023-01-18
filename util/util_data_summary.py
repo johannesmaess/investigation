@@ -120,7 +120,7 @@ def distribution_plot(vals, gammas, mode='hist', cutoff = 1e-2, aggregate_over=N
                 ax.set_xticks(1+np.arange(len(gammas)), gammas)
 
                 ax.axhline(1, color="green")
-            else: raise f"Invalid mode: {mode}"
+            else: raise Exception(f"Invalid mode: {mode}")
 
     plt.subplots_adjust(wspace=0.1, hspace=0.16) 
     plt.show()
