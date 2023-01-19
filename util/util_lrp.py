@@ -128,6 +128,8 @@ def compute_relevancies(mode, layers, A, output_rels='correct class', target=Non
 
     ## layer 0 => zB rule -> My implementation might suck though ###
 
+    # print(0, str(layers[0]).split('(')[0])
+
     A[0] = (A[0].data).requires_grad_(True)
     # lb = (A[0].data*0+(0-mean)/std).requires_grad_(True)
     # hb = (A[0].data*0+(1-mean)/std).requires_grad_(True)
