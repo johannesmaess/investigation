@@ -2,8 +2,8 @@
 #$ -q all.q
 #$ -cwd
 #$ -V
-#$ -t 1-64
-n_tasks = 64
+#$ -t 1-36
+n_tasks = 36
 
 import os
 import sys
@@ -28,8 +28,10 @@ from learning_lrp import train_lrp
 
 batch_size = 100
 T = 5e5
+
+opt='Adam'
 lr = 0.02
-momentum = 0. # SGD optim only.
+momentum = 0.5 # SGD optim only.
 
 loss_tag = "self--corr--\
 pred-perturbation-insensitivity=3,\
@@ -73,7 +75,7 @@ model_dict = load_mnist_v4_models()
 model_d3 = model_dict[d3_tag]
 
 if n_tasks > 1:
-    v = 17**np.linspace(0,1,8) - 1
+    v = 11**(np.linspace(0,1,6)**2) - 1
     gammas = np.transpose([np.tile(v, len(v)), np.repeat(v, len(v))])
     print(gammas.shape)
 else:
@@ -88,13 +90,14 @@ gamma_late  = torch.Tensor([gl]).requires_grad_(True)
 param_string = f"[ge={round(float(gamma_early.data), 3)},gl={round(float(gamma_late.data), 3)}]"
 parameters = [gamma_early, gamma_late]
 
-if 0:
+if opt=='Adam':
     optimizer = torch.optim.Adam(parameters, lr=lr)
     optimizer_string = f"opt=Adam,lr={lr}"
-else:
+elif opt=='SGD':
     optimizer = torch.optim.SGD(parameters, lr=lr, momentum=momentum)
     optimizer_string = f"opt=SGD,lr={lr},mom={momentum}"
-
+else:
+    assert 0
     
 
 model = ExplainableNet(model_d3).eval().to(device)
