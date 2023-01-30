@@ -442,7 +442,7 @@ def col_norms_for_matrices(comp_mats, ord=1):
 def plot_evals_lineplot(vals, gammas=np.linspace(0,1,201)[:-1], 
                 num_evals=None, mark_positive_slope=False, percentile_to_plot=None, plot_only_non_zero=False, ylim=4, one_plot_per='weight',
                 ylabel="Singular values", title=None,
-                yscale='linear', xscale='linear', 
+                yscale='linear', xscale='linear', figsize=None, show=True, 
                 sharey=False,
                 green_line_at_x=None,
                 tag_line=None, colormap='viridis',
@@ -450,7 +450,6 @@ def plot_evals_lineplot(vals, gammas=np.linspace(0,1,201)[:-1],
     """
     Plots the evolution of Eigenvalues with increasing gammas in a lineplot.
     """
-    if title is None: title=ylabel
 
     # reduce number of eval lines to show
     if num_evals:
@@ -466,12 +465,16 @@ def plot_evals_lineplot(vals, gammas=np.linspace(0,1,201)[:-1],
 
     y_lim_lower = {'linear':0, 'log': max(1e-3, vals.min())*.9}[yscale]
 
-    figsize = (20, 10) if n_ax==(1,1) else (5*n_ax[1], 3*n_ax[0])
+    if figsize is None: 
+        figsize = (20, 10) if n_ax==(1,1) else (5*n_ax[1], 3*n_ax[0])
     fig, axs = plt.subplots(*n_ax, figsize=figsize, sharey=sharey)
     axs, ax_i, ax = np.array(axs).flatten(), -1, None
 
-    fig.suptitle(f'Evolution of {title} with increasing $\gamma$' +
-            ('\nFat bar below indicates section of positive derivative' if mark_positive_slope else ''))
+    if title is not None:
+        fig.suptitle(title)
+    else:
+        fig.suptitle(f'Evolution of {ylabel} with increasing $\gamma$' +
+                ('\nFat bar below indicates section of positive derivative' if mark_positive_slope else ''))
 
     ### helper functions ###
     def ax_init():
@@ -530,7 +533,8 @@ def plot_evals_lineplot(vals, gammas=np.linspace(0,1,201)[:-1],
                 ax.title.set_text(f"({i},{j}) {mask.sum()}/{np.prod(mask.shape)} lines are non-zero.")
             Y = evals + np.random.normal(0, .005, size=evals.shape[1])[None, :] # add some random noise, such that lines don't overlap.
 
-            labels = [f'Exp. {i+1}, Point {j+1}, EV {k+1}' for k in range(evals.shape[1])]
+            labels = [f'Exp. {i+1}, Point {j+1}, Sval {k+1}' for k in range(evals.shape[1])]
+            labels = [f'Sval {k+1}' for k in range(evals.shape[1])]
             if tag_line is not None:
                 assert len(tag_line) == len(labels), "Invalid labels per line passed."
                 labels = tag_line
@@ -569,7 +573,10 @@ def plot_evals_lineplot(vals, gammas=np.linspace(0,1,201)[:-1],
     if one_plot_per=='in total': ax_show()
 
     plt.subplots_adjust(hspace=0.3)
-    plt.show()
+    if show:
+        plt.show()
+    else:
+        return fig, axs
 
 
 def eval_peak_distribution_plot(computed_evals, gammas, weights_lbls=None):
