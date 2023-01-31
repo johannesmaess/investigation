@@ -90,18 +90,19 @@ def compute_relevancies(mode, layers, A, output_rels='correct class', target=Non
 
         if isinstance(layers[l],torch.nn.MaxPool2d): layers[l] = torch.nn.AvgPool2d(2)
         if isinstance(layers[l],torch.nn.Conv2d) or isinstance(layers[l],torch.nn.AvgPool2d):
-
             # default: LRP-0.
             rho = lambda p: p;
             helper_layer = tut_utils.newlayer(layers[l], rho)
 
             if isinstance(layers[l],torch.nn.Conv2d):
                 if 'Gamma' in mode:
-                    layer_smaller = float(mode.split("l<"    )[1].split(" ")[0])
-                    if l < layer_smaller:
+                    l_ub = float(mode.split("l<")[1].split(" ")[0]) if "l<" in mode else 1000
+                    l_lb = float(mode.split("l>")[1].split(" ")[0]) if "l>" in mode else -1000
+                    if l_lb < l < l_ub:
                         curr_gamma = float(gam) if 'inf' != (gam := mode.split("gamma=")[1].split(" ")[0]) else 1e8
+                        # print(l, curr_gamma)
                         if 'Gamma.' in mode:
-                            rho = lambda p: p + curr_gamma*p.clamp(min=0);
+                            rho = lambda p: p + curr_gamma*p.clamp(min=0)
                             helper_layer = tut_utils.newlayer(layers[l], rho)
                         elif 'Gamma mat.' in mode:
                             helper_layer = copy.deepcopy(layers_conv_as_mat[l]) # todo: in the notebook I used a precomputation "layers_conv_as_mat"
@@ -154,7 +155,7 @@ def compute_relevancies(mode, layers, A, output_rels='correct class', target=Non
 
 
 # compute global LRP transition matrix
-def LRP_global_mat(model, point, gamma, l_leq = 1000, delete_unactivated_subnetwork = 'mask', l_inp=0, l_out=-1):    
+def LRP_global_mat(model, point, gamma, l_lb = -1000, l_ub = 1000, delete_unactivated_subnetwork = 'mask', l_inp=0, l_out=-1):    
     assert len(point.shape) == 1, f"Dont pass batch. 'point' should have 1 dim but shape is {point.shape}"
     if gamma=='inf': gamma=1e8
 
@@ -176,7 +177,7 @@ def LRP_global_mat(model, point, gamma, l_leq = 1000, delete_unactivated_subnetw
     A_repeated = [torch.cat([a] * num_basis_vectors) for a in A]
     
     # LRP backward and reshape
-    R_basis_vector_projections = compute_relevancies(mode=f'Gamma. l<{l_leq} gamma={gamma}', layers=layers, A=A_repeated, output_rels=basis_vectors, l_out=l_out, return_only_l=l_inp)
+    R_basis_vector_projections = compute_relevancies(mode=f'Gamma. l>{l_lb} l<{l_ub} gamma={gamma}', layers=layers, A=A_repeated, output_rels=basis_vectors, l_out=l_out, return_only_l=l_inp)
     LRP_backward = R_basis_vector_projections.reshape((num_basis_vectors, -1)).T
 
     if delete_unactivated_subnetwork == True:
