@@ -11,3 +11,6 @@ pickle/d3_copy*
 # QSUB log and error files
 *.py.o
 *.py.e
+
+# temporary
+pickle/d3/llrp__*

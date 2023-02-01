@@ -469,7 +469,7 @@ def plot_vals_lineplot(vals, gammas=np.linspace(0,1,201)[:-1],
 
     # 
     if type(xlim) == int:
-        x_lim_lower = {'linear':0, 'log': max(1e-3, gammas.min())*.9}[xscale]
+        x_lim_lower = {'linear':0, 'log': max(1e-3, gammas[0])*.9}[xscale]
         xlim = [x_lim_lower, xlim]
     elif type(xlim) == tuple:
         xlim = list(xlim)
