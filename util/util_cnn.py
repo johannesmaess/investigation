@@ -120,31 +120,59 @@ def test(model, device, test_loader):
 # Create CNN Model
 VERSION = 4
 
+def add_conv(in_channels, out_channels, kernel_size=5, padding=0):
+    return [torch.nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size, padding=padding, stride=1),
+                torch.nn.ReLU()]
 class CNNModel(torch.nn.Module):
-    def __init__(self, seed=0, cb1_channels=[16], cb2_channels=[32]):
+    def __init__(self, layers=None, seed=0, v=4, **kwargs):
         super(CNNModel, self).__init__()
 
         torch.random.manual_seed(seed)
+        if layers is not None:
+            # manually passed layers
+            self.seq = torch.nn.Sequential(*layers)
+        elif v==4:
+            self.init_v4(**kwargs)
+        elif v==5:
+            self.init_v5(**kwargs)
+
+
+    def init_v5(self, Fs=[3,3,3,3,3,3,]):
+        n_filters = 10 # in every hidden layer
+        Fs = np.array(Fs)
+        paddings = (Fs / 2).astype(int)
+        assert np.all(Fs == (1 + 2*paddings)), "Give uneven Kernel sizes please."
+        
+        # First Conv layers goes from one channel to 10 channels
+        layers = add_conv(in_channels=1, out_channels=n_filters, kernel_size=Fs[0], padding=paddings[0])
+
+        # all other conv layers are "square" going form 10 channels to 10 channels
+        for i in range(1, len(Fs)):
+            layers += add_conv(n_filters, n_filters, kernel_size=Fs[i], padding=paddings[i])
+        
+        # Apply a global average pooling, to get only 10 Values in the end.
+        layers += [torch.nn.AvgPool2d(kernel_size=28), torch.nn.Flatten()]
+
+        self.seq = torch.nn.Sequential(*layers)
+
+
+    def init_v4(self, cb1_channels=[16], cb2_channels=[32]):
 
         layers = []
-        def add_conv(in_channels, out_channels, kernel_size=5, padding=0):
-            nonlocal layers
-            layers += [torch.nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size, padding=padding, stride=1),
-                       torch.nn.ReLU()]
         
         # Conv Block 1
         channels_in_out = [(1, cb1_channels[0])] + [(cb1_channels[i-1], cb1_channels[i]) for i in range(1, len(cb1_channels))]
 
-        for in_c, out_c in channels_in_out[:-1]: add_conv(in_c, out_c, 3, 1)
-        in_c, out_c = channels_in_out[-1];       add_conv(in_c, out_c, 5, 0) # wide conv for last layer in block
+        for in_c, out_c in channels_in_out[:-1]: layers += add_conv(in_c, out_c, 3, 1)
+        in_c, out_c = channels_in_out[-1];       layers += add_conv(in_c, out_c, 5, 0) # wide conv for last layer in block
         
         # Max pool 1
         layers.append(torch.nn.MaxPool2d(kernel_size=2))
      
         # Convolution 2
-        add_conv(in_channels=cb1_channels[-1], out_channels=cb2_channels[0])
+        layers += add_conv(in_channels=cb1_channels[-1], out_channels=cb2_channels[0])
         for i in range(1, len(cb2_channels)):
-            add_conv(in_channels=cb2_channels[i-1], out_channels=cb2_channels[i], kernel_size=3, padding=1)
+            layers += add_conv(in_channels=cb2_channels[i-1], out_channels=cb2_channels[i], kernel_size=3, padding=1)
         
         # Max pool 2
         layers.append(torch.nn.MaxPool2d(kernel_size=2))
@@ -168,7 +196,10 @@ def data_loaders(shuffle = True, batch_size = 100, shapley_values_for=None, poin
     """
     # Prepare Dataset
     # load data
-    train = pd.read_csv(r"./dataset/kaggle_input/train.csv",dtype = np.float32)
+    try:
+        train = pd.read_csv(r"./dataset/kaggle_input/train.csv",dtype = np.float32)
+    except:
+        train = pd.read_csv(r"/Users/jmaess/Repositories/Masterarbeit/dataset/kaggle_input/train.csv",dtype = np.float32)
 
     # split data into features(pixels) and labels(numbers from 0 to 9)
     targets_numpy = train.label.values
@@ -214,7 +245,7 @@ def first_mnist_batch(batch_size = 100, test=True):
         return data, target
 
 
-def train(model, n_iters, train_loader, test_loader):
+def train(model, n_iters, train_loader, test_loader, device="cpu", log_every=5000):
     # Cross Entropy Loss 
     error = torch.nn.CrossEntropyLoss()
 
@@ -229,11 +260,15 @@ def train(model, n_iters, train_loader, test_loader):
     iteration_list = []
     accuracy_list = []
 
+    if device=="mps":
+        assert torch.backends.mps.is_available() and torch.backends.mps.is_built(), "MPS backend not available. Are you on your Mac?"
+    model.to(device)
+
     while True: # epochs until n_iters reached.
         for i, (images, labels) in enumerate(train_loader):
             
-            train = Variable(images.view(100,1,28,28))
-            labels = Variable(labels)
+            train = Variable(images.view(100,1,28,28)).to(device)
+            labels = Variable(labels).to(device)
             
             # Clear gradients
             optimizer.zero_grad()
@@ -259,7 +294,8 @@ def train(model, n_iters, train_loader, test_loader):
                 # Iterate through test dataset
                 for images, labels in test_loader:
                     
-                    test = Variable(images.view(100,1,28,28))
+                    test = Variable(images.view(100,1,28,28)).to(device)
+                    labels = labels.to(device)
                     
                     # Forward propagation
                     outputs = model(test)
@@ -281,43 +317,60 @@ def train(model, n_iters, train_loader, test_loader):
 
             def log(): print('Iteration: {}  Loss: {}  Accuracy: {} %'.format(count, loss.data, accuracy))
             if count == n_iters: log(); return model, iteration_list, loss_list, accuracy_list
-            if count % 500 == 0: log()
+            if count % log_every == 0: log()
 
-def init_and_train_and_store(params):
-    seed, cb1_channels, cb2_channels = params
-
-    train_loader, test_loader = data_loaders()
-    print(f"Start training model with seed={seed}, cb1_channels={cb1_channels}, cb2_channels={cb2_channels}.")
-    ret =  train(CNNModel(seed, cb1_channels, cb2_channels), n_iters=2500, train_loader=train_loader, test_loader=test_loader)
+def init_and_train_and_store(params, n_iters=2500, device='cpu'):
+    print(f"Start training model with params={params}.")
+    model = CNNModel(**params)
+    ret =  train(model, n_iters, *data_loaders(), device=device)
     
-    fn = params_to_filename(seed, cb1_channels, cb2_channels)
+    fn = params_to_filename(**params)
+    print(fn)
     torch.save(ret[0].state_dict(), "./models/"+fn)
     
-    print(f"Stored trained model with seed={seed}, cb1_channels={cb1_channels}, cb2_channels={cb2_channels}.")
-    return ret
+    print(f"Stored trained model with params={params}. Last accuracy: {ret[-1][-1]} at time {ret[1][-1]}.")
+    # return ret
 
 # for loading and storing
-def params_to_filename(seed, cb1_channels, cb2_channels):
-    a, b = '', ''
-    for width in cb1_channels: a += '-' + str(width)
-    for width in cb2_channels: b += '-' + str(width)
-    return f"mnist_cnn_v4_cb1{a}_cb2{b}_seed-{seed}.torch"
+def params_to_filename(v=4, seed=1, cb1_channels=None, cb2_channels=None, Fs=None):
+    if v==4:    
+        a, b = '', ''
+        for width in cb1_channels: a += '-' + str(width)
+        for width in cb2_channels: b += '-' + str(width)
+        return f"mnist_cnn_v4_cb1{a}_cb2{b}_seed-{seed}.torch"
+    
+    if v==5:
+        a=''
+        for F in Fs: a += '-' + str(F)
+        return f"mnist_cnn_v5_Fs{a}_seed-{seed}.torch"
+    
+    raise Exception(f"Invalid version {v}")
+        
 
 def params_from_filename(fn):
-    cb1_channels = fn.split('cb1-')[1].split('_')[0].split('-')
-    cb2_channels = fn.split('cb2-')[1].split('_')[0].split('-')
     seed = fn.split('seed-')[1].split('.torch')[0]
-    return int(seed), \
-           [int(width) for width in cb1_channels], \
-           [int(width) for width in cb2_channels]
+    if "v4" in fn:    
+        cb1_channels = fn.split('cb1-')[1].split('_')[0].split('-')
+        cb2_channels = fn.split('cb2-')[1].split('_')[0].split('-')
+        return {'v':4, 'seed': int(seed), \
+            'cb1_channels': [int(width) for width in cb1_channels], \
+            'cb2_channels': [int(width) for width in cb2_channels] }
+    
+    if "v5" in fn:
+        Fs = fn.split('Fs-')[1].split('_')[0].split('-')
+        return {'v':5, 'seed': int(seed), \
+            'Fs': [int(F) for F in Fs] }
+    
+    raise Exception(f"Invalid version. Fn: {fn}")
+    
 
 def load_mnist_v4_models():
     # load v4 models
     model_dict = {}
     for fn in os.listdir(MNIST_CNN_PATH):
-        if 'mnist_cnn_v4' in fn:
+        if 'mnist_cnn_v4' in fn or 'mnist_cnn_v5' in fn:
             params = params_from_filename(fn)
-            cnn_model = CNNModel(*params).to(device)
+            cnn_model = CNNModel(**params).to(device)
             cnn_model.load_state_dict(torch.load(os.path.join(MNIST_CNN_PATH, fn)))
             model_dict[fn[13:-6]] = cnn_model
 

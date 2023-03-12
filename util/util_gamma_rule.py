@@ -1,5 +1,5 @@
 from functools import partial
-from tqdm.notebook import tqdm
+from tqdm import tqdm
 
 import numpy as np
 from numpy.linalg import eig, svd
@@ -348,7 +348,7 @@ def calc_vals(M, num_vals, return_vecs=False, svd_mode=True, abs_vals=False):
     # return sorted vals and vecs
     return (vals[order], np.array(vecs).T[order] if return_vecs else None)
 
-def calc_vals_batch(matrices, num_vals='auto', return_vecs=False, svd_mode=True, abs_vals=False, tqdm_for='matrix'):
+def calc_vals_batch(matrices, num_vals='auto', return_vecs=False, svd_mode=True, abs_vals=False, tqdm_for='matrix', save_for=None, save_func=None):
     """
     Wraps around calc_evals to make calls for multiple weights, and multiple reference points.
     Mostly useful for determining an efficient number of vals to compute per matrix, putting the results into uniform arrays, and its checks.
@@ -358,6 +358,11 @@ def calc_vals_batch(matrices, num_vals='auto', return_vecs=False, svd_mode=True,
     if tqdm_for=='matrix': itm = tqdm
     if tqdm_for=='point':  itp = tqdm
     if tqdm_for=='gamma':  itg = tqdm
+    # save intermediate progress
+    sg, sp, sm = [lambda x: 0]*3
+    if save_for=='matrix': sm = lambda vals: print(f"Saving intermediate result. {i}/{len(matrices)}")              or save_func(vals)
+    if save_for=='point':  sp = lambda vals: print(f"Saving intermediate result. {j}/{len(matrices_per_weight)}")   or save_func(vals)
+    if save_for=='gamma':  sg = lambda vals: print(f"Saving intermediate result. {k}/{len(matrices_per_point)}")    or save_func(vals)
 
     n_weights, n_points, n_gammas = matrices.shape[:3]
     assert len(matrices[0, 0, 0].shape) == 2, "'matrices' should contain 2D arrays (np.ndarray or scipy.coo_array), nested in a 2D structure"
@@ -391,12 +396,20 @@ def calc_vals_batch(matrices, num_vals='auto', return_vecs=False, svd_mode=True,
     if return_vecs: computed_evecs = np.zeros((n_weights, n_points, n_gammas, vals_per_matrix.max(), vec_len), dtype=dtype)
 
     # calculate decomposition
-    for i, matrices_per_weight in itm(enumerate(matrices)):
-        for j, matrices_per_point in itp(enumerate(matrices_per_weight)):
-            for k, matrix_per_gamma in itg(enumerate(matrices_per_point)):
-                evals, evecs = calc_vals(matrix_per_gamma, num_vals=vals_per_matrix[i,j], return_vecs=return_vecs)
-                computed_evals[i, j, k, :len(evals)] = evals
-                if return_vecs: computed_evecs[i, j, k, :len(evecs)] = evecs
+    try:
+        for i, matrices_per_weight in itm(enumerate(matrices)):
+            for j, matrices_per_point in itp(enumerate(matrices_per_weight)):
+                for k, matrix_per_gamma in itg(enumerate(matrices_per_point)):
+                    evals, evecs = calc_vals(matrix_per_gamma, num_vals=vals_per_matrix[i,j], return_vecs=return_vecs)
+                    computed_evals[i, j, k, :len(evals)] = evals
+                    if return_vecs: computed_evecs[i, j, k, :len(evecs)] = evecs
+
+
+                    sg(computed_evals)
+                sp(computed_evals)
+            sm(computed_evals)
+    except KeyboardInterrupt:
+        print("Received Interrupt. Stop computation, return incomplete result.")
 
     if dtype==np.cfloat:
         # if none of the calculations returned imaginary parts, change dtype to real.
@@ -441,6 +454,7 @@ def col_norms_for_matrices(comp_mats, ord=1):
     return col_norms
 
 
+
 def plot_vals_lineplot(vals, gammas=np.linspace(0,1,201)[:-1], 
                 mark_positive_slope=False, plot_only_non_zero=False, one_plot_per='weight',
                 num_vals_largest=None, num_vals_total=None,
@@ -449,15 +463,46 @@ def plot_vals_lineplot(vals, gammas=np.linspace(0,1,201)[:-1],
                 yscale='linear', xscale='linear', sharey=False, xtick_mask=None,
                 figsize=None, show=True, 
                 green_line_at_x=None, tag_line=None, 
-                colormap='viridis'):
+                colormap='viridis',
+                # give location of legend
+                legend=False, 
+                # divide every spectra by its first singular value
+                norm_s1=False, 
+                # divide every (n-th singular) value by (the n-th singular value at gamma=0)
+                norm_g0=False,
+                # spectra mode: one line represents one spectra. one spectra per gamma.
+                spectra=False, 
+                ):
     """
     Plots the evolution of Eigenvalues with increasing gammas in a lineplot.
     """
 
+    vals = vals.copy()
+
+    if spectra:
+        ylabel='$\sigma_i(\gamma)$'
+        xlabel = '$i$'
+    else:
+        xlabel = '$\gamma$'
+
+    assert not (norm_g0 and norm_s1)
+    # divide every spectra by its first singular value
+    if norm_s1: 
+        vals /= vals[:, :, :, :1]
+        ylabel='$\\frac{ \sigma_i(\gamma) }{ \sigma_1(\gamma) }$'
+    # divide every (n-th singular) value by (the n-th singular value at gamma=0)
+    if norm_g0: 
+        vals /= vals[:, :, :1, :]
+        ylabel='$\\frac{ \sigma_i(\gamma) }{ \sigma_i(0) }$'
+
+    if spectra:
+        vals = np.transpose(vals, (0,1,3,2))
+        vals = vals[:, :, np.any(vals, axis=(0,1,3)), :]
+
     # reduce number of eval lines to show to first n.
+    assert not (num_vals_largest and num_vals_total)
     if num_vals_largest:
         vals = vals[:, :, :, :num_vals_largest]
-    assert not (num_vals_largest and num_vals_total)
 
     n_ax_dict = {
         'in total': (1, 1),
@@ -477,7 +522,8 @@ def plot_vals_lineplot(vals, gammas=np.linspace(0,1,201)[:-1],
         print(f'Warn: Invalid xlim: {xlim}. Setting xlim to None.')
         xlim = None
     
-    if xlim:
+    if spectra: pass
+    elif xlim:
         mask = np.logical_and(gammas >= xlim[0], gammas <= xlim[1])
         gammas = gammas[mask]
         vals = vals[:, :, mask]
@@ -509,13 +555,13 @@ def plot_vals_lineplot(vals, gammas=np.linspace(0,1,201)[:-1],
 
     ### helper functions ###
     def ax_init():
-        nonlocal axs, ax, ax_i
+        nonlocal axs, ax, ax_i, xlabel
         # iterate to next ax
         ax_i += 1
         ax = axs[ax_i]
 
         # plt.figure(figsize=(20,10))
-        ax.set_xlabel('$\gamma$')
+        ax.set_xlabel(xlabel)
         if i==0 or sharey==False: 
             ax.set_ylabel(ylabel)
 
@@ -525,10 +571,12 @@ def plot_vals_lineplot(vals, gammas=np.linspace(0,1,201)[:-1],
         ax.set_yscale(yscale)
         
     def ax_show():
-        nonlocal ax, xlim, ylim
+        nonlocal ax, xlim, ylim, legend
 
-        if tag_line is not None:
-            ax.legend(loc='upper right')
+        if (not legend) and (tag_line is not None):
+            legend='upper right'
+        if legend:
+            ax.legend(loc=legend)
 
         # set ylim
         ylim_u = ylim[1] * 1.01 + .1
@@ -545,7 +593,8 @@ def plot_vals_lineplot(vals, gammas=np.linspace(0,1,201)[:-1],
         ax.set_xlim((xlim_l, xlim_u))
 
     ### preemptive checks ###
-    assert np.all([[len(line) == len(gammas) for line in sub_list] for sub_list in vals]), "Shape doesn't match."
+    if not spectra:
+        assert np.all([[len(line) == len(gammas) for line in sub_list] for sub_list in vals]), "Shape doesn't match."
 
     if one_plot_per=='in total': ax_init()
 
@@ -582,30 +631,38 @@ def plot_vals_lineplot(vals, gammas=np.linspace(0,1,201)[:-1],
                 # print(f"Reducing num of lines from: {Y.shape[1]} to {len(indices)}")
                 Y = Y[:, indices]
 
-            labels = [f'Exp. {i+1}, Point {j+1}, Sval {k+1}' for k in range(Y.shape[1])]
-            labels = [f'Singular value {k+1}' for k in range(Y.shape[1])] # <- prettier, for Proposal plot
-            if tag_line is not None:
-                assert len(tag_line) == len(labels), "Invalid labels per line passed."
-                labels = tag_line
             
-            # If gammas are numerical, use them to determine x position of lines. If they are strings, plot evals in equal spacing, and label them with the 'gammas'
-            if np.any([type(g) is str for g in gammas]):
-                xtick = np.arange(len(gammas))
-                if xtick_mask is None: xtick_mask = np.full_like(xtick, True, dtype=bool)
-
-                ax.set_xticks(xtick[xtick_mask])
-                lbls = gammas
-                lbls = [pretty_num(lbl) for lbl in lbls]
-                lbls = np.array(lbls)[xtick_mask]
-                ax.set_xticklabels(lbls)
-            else:
-                xtick=gammas
-
             if colormap is not None:
                 # count number of lines that have non-zero, non-nan elements in them
                 num_colors = np.sum(np.any((Y != 0)*1 - np.isnan(Y), axis=0))
                 ax.set_prop_cycle(mpl.cycler('color', [mpl.colormaps[colormap](k) for k in np.linspace(0, 1, num_colors)]))  
-            ax.plot(xtick, Y, label=labels)
+
+            if spectra: 
+                Y = Y[np.any(Y, axis=1)]
+                ax.plot(Y, label=gammas)
+
+            else:
+                # labels for legend
+                labels = [f'Exp. {i+1}, Point {j+1}, Sval {k+1}' for k in range(Y.shape[1])]
+                labels = [f'Singular value {k+1}' for k in range(Y.shape[1])] # <- prettier, for Proposal plot
+                if tag_line is not None:
+                    assert len(tag_line) == len(labels), "Invalid labels per line passed."
+                    labels = tag_line
+
+                # If gammas are numerical, use them to determine x position of lines. If they are strings, plot evals in equal spacing, and label them with the 'gammas'
+                if np.any([type(g) is str for g in gammas]):
+                    xtick = np.arange(len(gammas))
+                    if xtick_mask is None: xtick_mask = np.full_like(xtick, True, dtype=bool)
+
+                    ax.set_xticks(xtick[xtick_mask])
+                    lbls = gammas
+                    lbls = [pretty_num(lbl) for lbl in lbls]
+                    lbls = np.array(lbls)[xtick_mask]
+                    ax.set_xticklabels(lbls)
+                else:
+                    xtick=gammas
+
+                ax.plot(xtick, Y, label=labels)
 
 
             if mark_positive_slope: # plot a scatter dot if the series values is increasing

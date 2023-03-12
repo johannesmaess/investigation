@@ -23,3 +23,19 @@ for d in ['mae', 'mse', 'corr']:
     for n in ['', 'norm', 'abs-norm']:
         for which in ['pred', 'other', 'both'][:]:
             all_shap_metric_tags.append(f"shap--{d}--{n}--{which}")
+
+
+### V5 models
+s4_after_conv_layer = [3, 5, 7]
+s6_after_conv_layer = [3, 5, 7, 9, 11]
+s8_after_conv_layer = [3, 5, 7, 9, 11, 13, 15]
+
+s4f3_tag = 'Fs-3-3-3-3_seed-0'
+s4f7_tag = 'Fs-7-7-7-7_seed-0'
+s4f5_tag = 'Fs-5-5-5-5_seed-0'
+
+
+s6f3_tag = 'Fs-3-3-3-3-3-3_seed-0'
+s6f5_tag = 'Fs-5-5-5-5-5-5_seed-0'
+s6f7_tag = 'Fs-7-7-7-7-7-7_seed-0'
+s8f7_tag = 'Fs-7-7-7-7-7-7-7-7_seed-0'

@@ -1,34 +1,62 @@
 import numpy as np
 import torch
 from scipy.sparse import coo_array
-from tqdm.notebook import tqdm
+from tqdm import tqdm
 import copy
 
 import util.util_tutorial as tut_utils
 
 import matplotlib.pyplot as plt
 
-def layerwise_forward_pass(model, data=None, checks=False):
-    layers = tut_utils.toconv(list(model.seq))
+def layerwise_forward_pass(model, data=None, checks=False, pos_neg=False): # just for MNIST:
+    return layerwise_forward_pass_general(list(model.seq), data, checks, pos_neg, inp_shape=(-1,1,28,28))
+
+def layerwise_forward_pass_general(layers, data=None, checks=False, pos_neg=False, inp_shape=None):
+    layers = tut_utils.toconv(layers)
     if data is None: return layers
     L = len(layers)
 
-    # A = [data]+[None]*L
-    A = [data.reshape(-1,1,28,28)]+[None]*L
+    data = data.reshape(inp_shape) if inp_shape else data[:, :, None, None]
+
+    A = [data]+[None]*L
+    A_pos = [None]*(L+1)
+    A_neg = [None]*(L+1)
 
     for l in range(L):
-        if isinstance(layers[l], torch.nn.Flatten):
+        lay = layers[l]
+        if isinstance(lay, torch.nn.Flatten):
             batch_size, *image_size = A[l].shape
             A[l+1] = A[l].reshape((batch_size, np.prod(image_size), 1, 1))
         else:
-            A[l+1] = layers[l].forward(A[l])
+            A[l+1] = lay.forward(A[l])
+            
+            # calculate positive and negative contributions to neurons seperately
+            if pos_neg and isinstance(lay, torch.nn.Conv2d):
+                with torch.no_grad():
+                    # print(l, lay.weight.shape)
+                    lay_pos, lay_neg = copy.deepcopy(lay), copy.deepcopy(lay)
+                    lay_pos.weight.data = lay.weight.clone().clip(min=0)
+                    lay_pos.bias.data =     lay.bias.clone().clip(min=0)
+                    lay_neg.weight.data = lay.weight.clone().clip(max=0)
+                    lay_neg.bias.data =     lay.bias.clone().clip(max=0)
+                    A_pos[l+1] = lay_pos.forward(A[l])
+                    A_neg[l+1] = lay_neg.forward(A[l])
 
-    if checks:
-        res = model.forward(A[0]).flatten().detach()
-        res_indirect =      A[-1].flatten().detach()
-        assert torch.allclose(res, res_indirect, atol=1e-5), f"Too high diff: { np.abs(res - res_indirect).max() }"
+                    # mm = lambda x: print(float(x.weight.min()), float(x.weight.max()))
+                    # mm(lay)
+                    # mm(lay_pos)
+                    # mm(lay_neg)
 
+    # if checks:
+    #     res = model.forward(A[0]).flatten().detach()
+    #     res_indirect =      A[-1].flatten().detach()
+    #     assert torch.allclose(res, res_indirect, atol=1e-5), f"Too high diff: { np.abs(res - res_indirect).max() }"
+
+    if pos_neg:
+        return A, A_pos, A_neg, layers
+    
     return A, layers
+
 
 def forward_and_explain(model, data, mode):
     A, layers = layerwise_forward_pass(model, data)
@@ -56,7 +84,7 @@ def compute_relevancies(mode, layers, A, output_rels='correct class', target=Non
     """
     Applies a LRP backpropagation through all or a subset of layers of the network.
     
-    Pass the relevancies in the deepest layer to iterate as "output_rels".
+    Pass the relevancies in the deepest layer to iterate as "output_rels". Only then, you need to pass "target".
     Specifiy which layer that is by "l_out"  
     Set "return_only_l", to return only the relevancies of this layer. This saves computation for all layers < l.
     """

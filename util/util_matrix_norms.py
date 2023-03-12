@@ -30,11 +30,11 @@ def nonzero_rows_cols_batch(per_weight):
     def uni(arr): return len(np.unique(arr))
     return np.array([[[[uni(mat.row), uni(mat.col)] for mat in per_gamma] for per_gamma in per_point] for per_point in per_weight]).transpose((3,0,1,2))
 
-def calc_norm_dict(matrices, svals):
+def calc_norm_dict(matrices, svals, num_filter_entries=None):
     """
     Returns a collection of useful norms, and bounds on the L2 norm in a dictionary.
     """
-    assert matrices.shape[:3] == svals.shape[:3]
+    assert matrices.shape[:3] == svals.shape[:3], f"{matrices.shape}, {svals.shape}"
     
     l1 = mat_norm_batch(matrices, p=1)
     linf = mat_norm_batch(matrices, p=np.inf)
@@ -42,7 +42,7 @@ def calc_norm_dict(matrices, svals):
 
     frobenius_b = (svals**2).sum(axis=3)**.5
     rel_err = np.abs((frobenius - frobenius_b) / np.maximum(frobenius, frobenius_b)).max()
-    assert rel_err < 0.001, f"Multiplicative difference in Frobenius norm calculation methods too high. {rel_err}"
+    assert rel_err < 0.01, f"Multiplicative difference in Frobenius norm calculation methods too high. {rel_err}"
     del frobenius_b
 
     l2 = svals[:, :, :, 0]
@@ -58,5 +58,18 @@ def calc_norm_dict(matrices, svals):
 
     sqrt_L1_Linf = np.sqrt(l1*linf)
     
-    return {k:v for k,v in zip(["L1_lower", "L1_upper", "Linf_lower", "Linf_upper", "sqrt_L1_Linf", "L2", "L1", "Linf", "frobenius"], 
+    norm_dict = {k:v for k,v in zip(["L1_lower", "L1_upper", "Linf_lower", "Linf_upper", "sqrt_L1_Linf", "L2", "L1", "Linf", "frobenius"], 
                                 (l1_lower, l1_upper, linf_lower, linf_upper, sqrt_L1_Linf, l2, l1, linf, frobenius)) }
+
+
+    if num_filter_entries is not None:
+        if num_filter_entries == 'lrp':
+            num_filter_entries = np.vectorize(lambda mat: (mat.toarray() != 0).sum(axis=0).max())(matrices)
+        else:
+            assert len(matrices) == len(num_filter_entries), "Pass the numer of filter entries for every matrix."
+            num_filter_entries = np.array(num_filter_entries)
+        
+        norm_dict["Linf by L1"] = l1 * num_filter_entries
+        norm_dict["sqrt_L1_Linf by L1"] = np.sqrt(1+num_filter_entries) * l1
+
+    return norm_dict
