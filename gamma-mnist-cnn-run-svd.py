@@ -28,7 +28,7 @@ for fn in os.listdir(MNIST_CNN_PATH):
 model_d3 = model_dict['cb1-8-8-8_cb2-16-16-16_seed-0']
 
 # svd from 2nd to 2nd to last layer.
-mat_funcs = [partial(LRP_global_mat, model=model_d3, l_leq=l_leq, l_inp=1, l_out=-2) for l_leq in d3_after_conv_layer[:-1]]
+mat_funcs = [partial(LRP_global_mat, model=model_d3, l_ub=l_ub, l_inp=1, l_out=-2) for l_ub in d3_after_conv_layer[:-1]]
 print("mat_funcs done")
 LRP__m1_to_1___cascading_gamma__gammas_0_1_21_inf = calc_mats_batch_functional(mat_funcs, gammas_0_1_21_inf, data[:20])
 print(LRP__m1_to_1___cascading_gamma__gammas_0_1_21_inf.shape, LRP__m1_to_1___cascading_gamma__gammas_0_1_21_inf[:, :1, :1])
