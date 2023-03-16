@@ -371,7 +371,7 @@ def load_mnist_v4_models():
         if 'mnist_cnn_v4' in fn or 'mnist_cnn_v5' in fn:
             params = params_from_filename(fn)
             cnn_model = CNNModel(**params).to(device)
-            cnn_model.load_state_dict(torch.load(os.path.join(MNIST_CNN_PATH, fn)))
+            cnn_model.load_state_dict(torch.load(os.path.join(MNIST_CNN_PATH, fn), map_location=device))
             model_dict[fn[13:-6]] = cnn_model
 
     return model_dict
