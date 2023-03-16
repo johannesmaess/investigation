@@ -1,8 +1,16 @@
 \documentclass{article}
 \usepackage[utf8]{inputenc}
+
+% plots
 \usepackage{tikz, pgfplots, amsmath}
 \usetikzlibrary{positioning,calc,arrows.meta}
 \pgfplotsset{compat=1.18} 
+
+% math
+\usepackage{amsmath}
+\usepackage{amssymb}
+
+\newcommand{\R}{\mathbb{R}}
 
 \begin{document}
 Hello
@@ -11,124 +19,155 @@ Hello
 
 
 \begin{tikzpicture}[
-    vec/.style={rectangle, draw=black, minimum size=7mm, minimum height=3cm},
-    mat/.style={rectangle, thick, draw=black, minimum size=9mm, minimum height=9mm},
-    meet/.style={circle, fill, minimum size=4pt, inner sep=0pt, outer sep=0pt},
-    nonl/.style={circle, minimum size=20pt, draw=black},
-    param/.style={circle, minimum size=20pt, draw=blue},
+    vec/.style={rectangle, minimum size=8mm, minimum height=3cm, draw=black, fill=#1},
+    vec/.default={blue!10!white},
+    mat/.style={rectangle, very thick, draw=black, minimum size=9mm, minimum height=9mm},
+    nonl/.style={rectangle, rounded corners, draw=black, minimum size=7mm, minimum height=7mm},
+    param/.style={circle, thick, minimum size=20pt, fill=lightgray!40!white, draw=black},
     ]
     \node[vec] (h_0) {
         $\begin{aligned}
-            &\;\vec{x} \\ &=: \\ &\;\vec{h_0}
+            &\;x \\ &=: \\ &h^{(0)}
         \end{aligned}$
     };
-    \node[meet, right=1cm of h_0] (m11) {};
-    \node[nonl, right=1cm of m11] (nl1) {$\sigma$};
-    \node[vec,  right=1cm of nl1] (h_1) {$h_1$};
-    \node[meet, right=1cm of h_1] (m12) {};
-    \node[nonl, right=1cm of m12] (nl2) {$\sigma$};
-    \node[vec,  right=1cm of nl2] (h_2) {$h_2$};
-    \node[meet, right=1cm of h_2] (m13) {};
-    \node[nonl, right=1cm of m13] (nl3) {$\sigma$};
-    \node[vec,  right=1cm of nl3] (h_3) {
-        $\begin{aligned}
-            &\;\vec{h_3} \\ &=: \\ &\;\vec{y}
+    \node[mat, right=0.7cm of h_0] (W1) {$W_1$};
+    \node[nonl, right=0.7cm of W1] (nl1) {$\sigma$};
+    \node[vec,  right=0.7cm of nl1] (h_1) {$h^{(1)}$};
+    \node[mat, right=0.7cm of h_1] (W2) {$W_2$};
+    \node[nonl, right=0.7cm of W2] (nl2) {$\sigma$};
+    \node[vec,  right=0.7cm of nl2] (h_2) {$h^{(2)}$};
+    \node[mat, right=0.7cm of h_2] (W3) {$W_3$};
+    \node[nonl, right=0.7cm of W3] (nl3) {$\sigma$};
+    \node[vec,  right=0.7cm of nl3] (h_3) {
+        $
+        \begin{aligned}
+            &h^{(3)} \\ &=: \\ &\;y
         \end{aligned}$
     };
 
-    \node[mat, below=1cm of m11] (W1) {$W_1$};
-    \node[mat, below=1cm of m12] (W2) {$W_2$};
-    \node[mat, below=1cm of m13] (W3) {$W_3$};
 
     % layer 1 arrows
-    \draw[-]                    (h_0.east) to (m11);
-    \draw[-]                    (W1.north) to (m11);
-    \draw[-{LaTeX[]}]           (m11) to (nl1.west);
+    \draw[-, thick]                    (h_0.east) to (W1);
+    \draw[-{LaTeX[]}, thick]           (W1) to (nl1.west);
     \draw[-{LaTeX[]}, dashed]   (nl1.east) to (h_1.west);
     % layer 2 arrows
-    \draw[-]                    (h_1.east) to (m12);
-    \draw[-]                    (W2.north) to (m12);
-    \draw[-{LaTeX[]}]           (m12) to (nl2.west);
+    \draw[-, thick]                    (h_1.east) to (W2);
+    \draw[-{LaTeX[]}, thick]           (W2) to (nl2.west);
     \draw[-{LaTeX[]}, dashed]   (nl2.east) to (h_2.west);
     % layer 3 arrows
-    \draw[-]                    (h_2.east) to (m13);
-    \draw[-]                    (W3.north) to (m13);
-    \draw[-{LaTeX[]}]           (m13) to (nl3.west);
+    \draw[-, thick]                    (h_2.east) to (W3);
+    \draw[-{LaTeX[]}, thick]           (W3) to (nl3.west);
     \draw[-{LaTeX[]}, dashed]   (nl3.east) to (h_3.west);
-    
-
-    %%% LRP backwards matrix construction %%%
-    % meeting points in second row
-    % \node[meet, below=1cm of W1] (m21) {};
-    % \node[meet, below=1cm of W2] (m22) {};
-    % \node[meet, below=1cm of W3] (m23) {};
-
-    % conditional relevancy matrices
-    \node[mat, below=1cm of W1] (R1) {$R^{(1 \leftarrow 1)}_{\cdot | \cdot}$};
-    \node[mat, below=1cm of W2] (R2) {$R^{(2 \leftarrow 2)}_{\cdot | \cdot}$};
-    \node[mat, below=1cm of W3] (R3) {$R^{(3 \leftarrow 3)}_{\cdot | \cdot}$};
-
-    % params
-    \node[param, right=1cm of R1] (param1) {$\theta$};
-    \node[param, right=1cm of R2] (param2) {$\theta$};
-    \node[param, right=1cm of R3] (param3) {$\theta$};
-
-    
-    % layer 1 arrows
-    \draw[-{LaTeX[]}, dashed]   (h_0.south) |- (R1.west);
-    \draw[-{LaTeX[]}, dashed]   (W1.south)  to (R1.north);
-    \draw[-{LaTeX[]}, dashed]   (param1.west) to (R1.east);
-    % layer 2 arrows
-    \draw[-{LaTeX[]}, dashed]   (h_1.south) |- (R2.west);
-    \draw[-{LaTeX[]}, dashed]   (W2.south)  to (R2.north);
-    \draw[-{LaTeX[]}, dashed]   (param2.west) to (R2.east);
-    % layer 3 arrows
-    \draw[-{LaTeX[]}, dashed]   (h_2.south) |- (R3.west);
-    \draw[-{LaTeX[]}, dashed]   (W3.south)  to (R3.north);
-    \draw[-{LaTeX[]}, dashed]   (param3.west) to (R3.east);
-
 
     %%% LRP backwards pass %%% 
-    % relevancy vectors
-    \node[vec,  below=3cm of h_0] (r_0) {$r^{(0)}$};
-    \node[vec,  below=3cm of h_1] (r_1) {$r^{(1)}$};
-    \node[vec,  below=3cm of h_2] (r_2) {$r^{(2)}$};
-    \node[vec,  below=3cm of h_3] (r_3) {$r^{(3)}$};
+    %% relevancy vectors
+    \node[vec=pink!40!white,  below=1.2cm of h_0] (r_0) {$r^{(0)}$};
+    \node[vec=pink!40!white,  below=1.2cm of h_1] (r_1) {$r^{(1)}$};
+    \node[vec=pink!40!white,  below=1.2cm of h_2] (r_2) {$r^{(2)}$};
+    \node[vec=pink!40!white,  below=1.2cm of h_3] (r_3) {
+        $\begin{aligned}
+            & \;\overline{y}\\ &=: \\ &r^{(3)}
+        \end{aligned}$
+    };
 
-    % meeting points in third row
-    \node[meet, below=of R1, right=of r_0] (m31) {};
-    \node[meet, below=of R2, right=of r_1] (m32) {};
-    \node[meet, below=of R3, right=of r_2] (m33) {};
-
-    % layer 1 arrows
-    \draw[-]                    (r_1.west) to (m31);
-    \draw[-]                    (R1.south) to (m31);
-    \draw[-{LaTeX[]}]           (m31) to (r_0.east);
-    % layer 2 arrows
-    \draw[-]                    (r_2.west) to (m32);
-    \draw[-]                    (R2.south) to (m32);
-    \draw[-{LaTeX[]}]           (m32) to (r_1.east);
-    % layer 3 arrows
-    \draw[-]                    (r_3.west) to (m33);
-    \draw[-]                    (R3.south) to (m33);
-    \draw[-{LaTeX[]}]           (m33) to (r_2.east);
-
-    % arrow to output layer relevancies
+    %% arrow to output layer relevancies
     \draw[-{LaTeX[]}, dashed]   (h_3.south) to node[right] {masking} (r_3.north);
 
+    %% conditional relevancy matrices
+    \node[mat, right=0.7cm of r_0] (R1) {$R^{(0 \leftarrow 1)}_{\cdot | \cdot}$};
+    \node[mat, right=0.7cm of r_1] (R2) {$R^{(1 \leftarrow 2)}_{\cdot | \cdot}$};
+    \node[mat, right=0.7cm of r_2] (R3) {$R^{(2 \leftarrow 3)}_{\cdot | \cdot}$};
     
+    %% arrows towards conditional relevancy matrices
+    % layer 1 arrows
+    \draw[-{LaTeX[]}, dashed]   (h_0.south) .. controls +(down:13mm) and +(up:13mm) .. (R1.north);
+    \draw[-{LaTeX[]}, dashed]   (W1.south)  .. controls +(down:13mm) and +(up:13mm) .. (R1.north);
+    % layer 2 arrows
+    \draw[-{LaTeX[]}, dashed]   (h_1.south) .. controls +(down:13mm) and +(up:13mm) .. (R2.north);
+    \draw[-{LaTeX[]}, dashed]   (W2.south)  .. controls +(down:13mm) and +(up:13mm) .. (R2.north);
+    % layer 3 arrows
+    \draw[-{LaTeX[]}, dashed]   (h_2.south) .. controls +(down:13mm) and +(up:13mm) .. (R3.north);
+    \draw[-{LaTeX[]}, dashed]   (W3.south)  .. controls +(down:13mm) and +(up:13mm) .. (R3.north);
+    
+    %% arrows of LRP backward pass
+    % layer 1 arrows
+    \draw[-, thick]            (r_1.west) to (R1);
+    \draw[-{LaTeX[]}, thick]   (R1) to (r_0.east);
+    % layer 2 arrows
+    \draw[-, thick]            (r_2.west) to (R2);
+    \draw[-{LaTeX[]}, thick]   (R2) to (r_1.east);
+    % layer 3 arrows
+    \draw[-, thick]            (r_3.west) to (R3);
+    \draw[-{LaTeX[]}, thick]   (R3) to (r_2.east);
+
+    %% params
+    \node[param, below right=12mm of R1.south] (param1) {$\theta^\text{\tiny{{(1)}}}$};
+    \node[param, below right=12mm of R2.south] (param2) {$\theta^\text{\tiny{{(2)}}}$};
+    \node[param, below right=12mm of R3.south] (param3) {$\theta^\text{\tiny{{(3)}}}$};
+
+    %% arrows towards conditional relevancy matrices
+    \draw[-{LaTeX[]}, dashed]   (param1.west) .. controls +(left:5mm) and +(down:5mm) .. (R1.south);
+    \draw[-{LaTeX[]}, dashed]   (param2.west) .. controls +(left:5mm) and +(down:5mm) .. (R2.south);
+    \draw[-{LaTeX[]}, dashed]   (param3.west) .. controls +(left:5mm) and +(down:5mm) .. (R3.south);
+
 \end{tikzpicture}
 
 \vspace{1in}
 
-% \begin{tikzpicture}
-%     \node[draw] (a) {A};
-%     \node[draw,right=of a] (b) {B};
-%     \node[draw,below=5mm of b] (c) {C};
+% \resizebox{\textwidth}{!}{%
+\begin{figure}
+\begin{tikzpicture}[]
+    \begin{axis}
+        [
+            name=a,
+            height=0.4\textwidth, width=0.4\textwidth,
+            xmin=-1.7, xmax=1.7, ymin=-1.7, ymax=1.7, 
+            axis lines=middle, axis line style={thick, -{Stealth[scale=1]}},
+            xtick={0}, ytick={0},
+            xlabel=$x_1$, xlabel style={below=(.06cm of current axis.right of origin), anchor=north east},
+            ylabel=$x_2$, ylabel style={left=(.06cm of current axis.above origin), anchor=north east},
+        ]
+        \draw[style=very thick] ( 1,0) -- (0,-1);
+        \draw[style=very thick] (-1,0) -- (0,-1);
+        \draw[style=very thick] ( 1,0) -- (0, 1);
+        \draw[style=very thick] (-1,0) -- (0, 1);
 
-%     \path[-{LaTeX[]}] (b) edge (c);
-%     \draw (a) |- ($(b)!0.42!(c)$);
-% \end{tikzpicture}
+        % label
+        \node[below left=-.1cm of current axis.north east] {$\| \vec{x} \|_1$};
+    \end{axis}
+    \begin{axis}
+        [
+            name=b, at=(a.south east), xshift=1em, 
+            height=0.4\textwidth, width=0.4\textwidth,
+            xmin=-1.7, xmax=1.7, ymin=-1.7, ymax=1.7, 
+            axis lines=middle, axis line style={thick, -{Stealth[scale=1]}},
+            xtick={0}, ytick={0},
+            xlabel=$x_1$, xlabel style={below=(.06cm of current axis.right of origin), anchor=north east},
+            ylabel=$x_2$, ylabel style={left=(.06cm of current axis.above origin), anchor=north east},
+        ]
+        \draw[style=very thick] (0,0) circle (1);
 
+        % label
+        \node[below left=-.1cm of current axis.north east] {$\| \vec{x} \|_2$};
+    \end{axis}
+    \begin{axis}
+        [
+            name=c, at=(b.south east), xshift=1em, 
+            height=0.4\textwidth, width=0.4\textwidth,
+            xmin=-1.7, xmax=1.7, ymin=-1.7, ymax=1.7, 
+            axis lines=middle, axis line style={thick, -{Stealth[scale=1]}},
+            xtick={0}, ytick={0},
+            xlabel=$x_1$, xlabel style={below=(.06cm of current axis.right of origin), anchor=north east},
+            ylabel=$x_2$, ylabel style={left=(.06cm of current axis.above origin), anchor=north east},
+        ]
+        \draw[style=very thick] (-1,-1) rectangle (1,1);
+        
+        % label
+        \node[below left=-.1cm of current axis.north east] {$\| \vec{x} \|_\infty$};
+    \end{axis}
+\end{tikzpicture}
+\caption[]{Unit circles of three vector norms on $\R^2$};
+\end{figure}
+% }
 
 \end{document}
