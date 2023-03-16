@@ -6,6 +6,7 @@ from numpy.linalg import eig, svd
 
 from util.util_data_summary import pretty_num
 from util.common import HiddenPrints
+from util.naming import *
 
 import torch
 
@@ -418,6 +419,8 @@ def calc_vals_batch(matrices, num_vals='auto', return_vecs=False, svd_mode=True,
         if return_vecs and not np.any(np.imag(computed_evecs)):
             computed_evecs = np.real(computed_evecs)
 
+    if save_func: save_func(computed_evals)
+
     return (computed_evals, computed_evecs if return_vecs else None)
 
 def calc_evals_batch(weights_list, points_list, gammas=np.linspace(0,1,201)[:-1], mode="forw recover activations", smart_gamma_func=None, output_layer_relevancies=None, return_matrices=False, num_vals_largest=None, return_evecs=False, abs_evals=False, svd_mode=False):
@@ -455,7 +458,7 @@ def col_norms_for_matrices(comp_mats, ord=1):
 
 
 
-def plot_vals_lineplot(vals, gammas=np.linspace(0,1,201)[:-1], 
+def plot_vals_lineplot(vals, gammas=None,
                 mark_positive_slope=False, plot_only_non_zero=False, one_plot_per='weight',
                 num_vals_largest=None, num_vals_total=None,
                 ylabel="Singular values", title=None,
@@ -477,7 +480,9 @@ def plot_vals_lineplot(vals, gammas=np.linspace(0,1,201)[:-1],
     Plots the evolution of Eigenvalues with increasing gammas in a lineplot.
     """
 
-    vals = vals.copy()
+    if type(vals) == tuple:   vals = load_data(*vals)
+    else:                     vals = vals.copy()
+    if gammas is None:        gammas = match_gammas(vals)
 
     if spectra:
         ylabel='$\sigma_i(\gamma)$'
@@ -687,7 +692,7 @@ def plot_vals_lineplot(vals, gammas=np.linspace(0,1,201)[:-1],
         return fig, axs
 
 
-def plot_multiplicative_change(vals, gammas, hmean=False, normalize=False, **passed_kwargs):
+def plot_multiplicative_change(vals, gammas=None, hmean=False, normalize=False, **passed_kwargs):
     kwargs = {
         "ylabel": "Multiplicative change",
         "title": "Multiplicative change per Singular value. Shows which Singular values decrease fastest relative to their size. Blue are biggest Svals. Red smallest.",
@@ -697,6 +702,10 @@ def plot_multiplicative_change(vals, gammas, hmean=False, normalize=False, **pas
         "colormap": "seismic",
     }
     for k,v in passed_kwargs.items(): kwargs[k] = v
+
+    if type(vals) == tuple:   vals = load_data(*vals)
+    else:                     vals = vals.copy()
+    if gammas is None:        gammas = match_gammas(vals)
         
     if normalize:
         vals = vals - vals[:, :, -1:, :]

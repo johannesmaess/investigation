@@ -5,6 +5,8 @@ import seaborn as sns
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from tqdm import tqdm
 from util.util_pickle import load_data
+from math import ceil, floor
+from util.naming import *
 
 def percentile(n):
     def percentile_(x):
@@ -64,7 +66,7 @@ def plot_hists_on_ax(ax, vals_for_point, gammas, bins = [0, 1e-5, 1e-4, 1e-3, 1e
             ax = divider.append_axes("bottom", size="100%", pad=0, sharey=ax)
 
 
-def distribution_plot(vals, gammas,
+def distribution_plot(vals, gammas=None,
                       mode='hist', cutoff = 1e-2, aggregate_over=None, agg=False,
                       # divide every spectra by its first singular value
                       norm_s1=False, 
@@ -81,6 +83,10 @@ def distribution_plot(vals, gammas,
     cutoff is the lower bound for Vals to be shown. 
     The Val is ommitted for all gammas, if it is not > cutoff for at least one gamma.
     """
+
+    if type(vals) == tuple:   vals = load_data(*vals)
+    else:                     vals = vals.copy()
+    if gammas is None:        gammas = match_gammas(vals)
 
     if norm_s1: 
         vals /= vals[:, :, :, :1]
@@ -286,53 +292,16 @@ def llrp_plot_training_for_tags(llrp_tags):
 
 ### More clever visualizations of Svals ### 
 
-def plot_last_sval(vals, gammas):
-    """
-    Plot the fraction of last to first singular value, as a function of gamma.
-    """
-    vals = vals.copy()
-
-    # norm s1
-    vals /= vals[:, :, :, :1]
-
-    # calculate which gamma yields the highest ratio sval_min / sval_max
-    res=[]
-
-    for wvals in vals[:]:                               # wwavls contain: per weight, per point, per gamma, n singular values
-        res.append([])
-        for pvals in wvals:                             # pvals contain:              per point, per gamma, n singular values
-            # filter for non-zero singular values
-            pvals=pvals[:, np.any(pvals>0, axis=0)]     # pvals contain:              per point, per gamma, k<n singular values
-
-            # print(pvals.shape)
-            res[-1].append(pvals[:, -1] )#/ pvals[:1, -1])
-
-    fig, axs = plt.subplots(1, len(res), figsize=(5*len(res), 6))
-
-    for r, ax in zip(np.array(res), axs):
-        ax.set_yscale('log')
-        ax.set_xlabel("$\gamma$")
-        ax.set_ylabel("$\\frac{\sigma_i(\gamma)}{\sigma_1(\gamma)}$")
-
-        if np.any([g=='inf' for g in gammas]):
-            print(gammas)
-            ax.plot(r.T)
-            ax.set_xticks(np.arange(len(gammas)))
-            ax.set_xticklabels(gammas)
-        else:
-            ax.plot(gammas, r.T)
-            ax.set_xscale('log')
-            ax.set_xlim((1e-3, 1e3))
-
-def plot_last_sval_maximum(vals, gammas=None):
+def plot_sval_func(vals, gammas=None,
+                           sval_func=lambda pvals: pvals[:, 0] / pvals[:, -1], # by default, we compute the condition number 
+                           minima = False # in this mode, we don't plot the lines for every gamma, but just summarize at which gammas the line's minima are, in boxplots.
+                           ):
     """
     Plot the gamma that maximises the fraction between the last to first singular value.
     """
-    vals = vals.copy()
 
-    # norm s1
-    vals /= vals[:, :, :, :1]
-
+    if type(vals) == tuple:   vals = load_data(*vals)
+    if gammas is None:        gammas = match_gammas(vals)
 
     # calculate which gamma yields the highest ratio sval_min / sval_max
     res=[]
@@ -341,22 +310,70 @@ def plot_last_sval_maximum(vals, gammas=None):
         res.append([])
         for pvals in wvals:                             # pvals contain:              per point, per gamma, n singular values
             # filter for non-zero singular values
+            # print("vals", pvals.shape, end=" -> ")
             pvals=pvals[:, np.any(pvals>0, axis=0)]     # pvals contain:              per point, per gamma, k<n singular values
+            # print(pvals.shape)            
+            func_vals = sval_func(pvals)
 
-            idx = pvals[:, -1].argmax()
-            g = gammas[idx]
-            res[-1].append(1e8 if g=='inf' else g)
+            if minima==True:
+                gamma_idx = func_vals.argmin()
+                g = gammas[gamma_idx]
+                res[-1].append(1e8 if g=='inf' else g)
+            else:
+                res[-1].append(func_vals)
 
     res = np.array(res)
-    plt.boxplot(res.T)
-    plt.ylim((-.5,5))
 
-def plot_determinant(vals, gammas):
+    if minima:
+        plt.boxplot(res.T)
+        plt.ylim((-.5,5))
+        plt.xlabel("Matrix No.")
+        plt.ylabel("$\gamma$")
+    else:
+        fig, axs = plt.subplots(1, len(res), figsize=(5*len(res), 6))
+        for r, ax in zip(res, axs):
+            ax.set_yscale('log')
+            ax.set_xlabel("$\gamma$")
+            ax.set_ylabel("$\\frac{\sigma_i(\gamma)}{\sigma_1(\gamma)}$")
+
+            if np.any([g=='inf' for g in gammas]):
+                print(gammas)
+                ax.plot(r.T)
+                ax.set_xticks(np.arange(len(gammas)))
+                ax.set_xticklabels(gammas)
+            else:
+                ax.plot(gammas, r.T)
+                ax.set_xscale('log')
+                ax.set_xlim((1e-3, 1e3))
+
+def plot_condition_number(*args, percentile=0, **kwargs):
+    if type(percentile) in (int, float):
+        l_percentile, u_percentile = percentile, 1 - percentile
+    else:
+        l_percentile, u_percentile = percentile
+        u_percentile = 1 - u_percentile
+    
+    assert l_percentile < u_percentile
+
+    def sval_func(pvals):
+        l_idx = (pvals.shape[1] - 1) * l_percentile
+        u_idx = (pvals.shape[1] - 1) * u_percentile
+
+        l_idx = int(floor(l_idx))
+        u_idx = int(ceil(u_idx))
+        
+        return pvals[:, l_idx] / pvals[:, u_idx]
+    
+    return plot_sval_func(*args, sval_func=sval_func, **kwargs)
+
+def plot_determinant(vals, gammas=None):
     """
     This fucntion uses the (not so established) notion of a "generalized determinant" for non-quadratic, and non-full rank matrixes: the product of all singular values that are non-zero.
     """
 
-    vals = vals.copy()
+    if type(vals) == tuple:   vals = load_data(*vals)
+    else:                     vals = vals.copy()
+    if gammas is None:        gammas = match_gammas(vals)
     
     # norm s1
     vals /= vals[:, :, :, :1]

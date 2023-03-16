@@ -15,6 +15,16 @@ gammas_0_1_21_inf = list(np.linspace(0,1,21).round(3)) + ['inf']
 # from 0 to 1000, roughly log distributed
 gammas40 = np.concatenate(([0, 1e-5, 3e-5, 1e-4, 3e-4], np.linspace(0.001, .01, 7)[:-1], np.linspace(0.01, .05, 7)[:-1], np.linspace(.05, .2, 7)[:-1], np.linspace(.2, 1, 7), 2**(np.arange(10)+1)))
 
+def match_gammas(vals):
+    num = vals.shape[2]
+    
+    if num==3: return gammas3
+    if num==5: return gammas5
+    if num==22: return gammas_0_1_21_inf
+    if num==40: return gammas40
+
+    print("Provide gammas manually, if they are not any of {gammas3, gammas5, gammas_0_1_21_inf, gammas40}.")
+    assert 0
 
 d3_after_conv_layer = [3, 5, 8, 10, 12, 16]
 
