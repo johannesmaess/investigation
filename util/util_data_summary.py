@@ -65,8 +65,40 @@ def plot_hists_on_ax(ax, vals_for_point, gammas, bins = [0, 1e-5, 1e-4, 1e-3, 1e
             ax.set_xticks([])
             ax = divider.append_axes("bottom", size="100%", pad=0, sharey=ax)
 
+def prep_data(vals, gammas=None, norm_g0=False, norm_s1=False, end_at_0=False, dice=()):
+    if type(vals) == tuple:   vals = load_data(*vals); assert vals is not False, "Could not load pickleid"
+    else:                     vals = vals.copy()
+    if gammas is None:        gammas = match_gammas(vals)
 
-def distribution_plot(vals, gammas=None,
+    assert not (norm_s1 and norm_g0)
+
+    if end_at_0:
+        vals = vals - vals[:, :, -1:, :]
+    
+    if norm_s1: 
+        vals /= vals[:, :, :, :1]
+        
+    # divide every (n-th singular) value by (the n-th singular value at gamma=0)
+    if norm_g0: 
+        vals /= vals[:, :, :1, :]
+
+    # take dice of svals and gammas
+    if dice != ():
+        selectors = [slice(0, None)] * 4
+        for i, slic in enumerate(dice): 
+            if   type(slic) == list:  selectors[i] = slic
+            elif type(slic) == int:   selectors[i] = slice(0, slic)
+            elif type(slic) == tuple:
+                if slic == (): continue # select everything
+                selectors[i] = slice(*slic)
+            else: assert False, f"Invalid dice: {dice}"
+
+        vals = vals[selectors[0], selectors[1], selectors[2], selectors[3]]
+        gammas = gammas[selectors[2]]
+
+    return vals, gammas
+
+def distribution_plot(vals, gammas=None, dice=(),
                       mode='hist', cutoff = 1e-2, aggregate_over=None, agg=False,
                       # divide every spectra by its first singular value
                       norm_s1=False, 
@@ -84,18 +116,9 @@ def distribution_plot(vals, gammas=None,
     The Val is ommitted for all gammas, if it is not > cutoff for at least one gamma.
     """
 
-    if type(vals) == tuple:   vals = load_data(*vals)
-    else:                     vals = vals.copy()
-    if gammas is None:        gammas = match_gammas(vals)
-
-    if norm_s1: 
-        vals /= vals[:, :, :, :1]
-        # ylabel='$\\frac{ \sigma_i(\gamma) }{ \sigma_1(\gamma) }$'
-    # divide every (n-th singular) value by (the n-th singular value at gamma=0)
-    if norm_g0: 
-        vals /= vals[:, :, :1, :]
-        # ylabel='$\\frac{ \sigma_i(\gamma) }{ \sigma_i(0) }$'
-
+    vals, gammas = prep_data(vals, gammas, norm_g0, norm_s1, dice=dice)
+    # if norm_s1:  ylabel='$\\frac{ \sigma_i(\gamma) }{ \sigma_1(\gamma) }$'
+    # if norm_g0:  ylabel='$\\frac{ \sigma_i(\gamma) }{ \sigma_i(0) }$'
 
     lbl_point=None
     sharey='row'
@@ -292,7 +315,7 @@ def llrp_plot_training_for_tags(llrp_tags):
 
 ### More clever visualizations of Svals ### 
 
-def plot_sval_func(vals, gammas=None,
+def plot_sval_func(vals, gammas=None, dice=(),
                            sval_func=lambda pvals: pvals[:, 0] / pvals[:, -1], # by default, we compute the condition number 
                            minima = False # in this mode, we don't plot the lines for every gamma, but just summarize at which gammas the line's minima are, in boxplots.
                            ):
@@ -300,8 +323,7 @@ def plot_sval_func(vals, gammas=None,
     Plot the gamma that maximises the fraction between the last to first singular value.
     """
 
-    if type(vals) == tuple:   vals = load_data(*vals)
-    if gammas is None:        gammas = match_gammas(vals)
+    vals, gammas = prep_data(vals, gammas, dice=dice)
 
     # calculate which gamma yields the highest ratio sval_min / sval_max
     res=[]
@@ -346,6 +368,8 @@ def plot_sval_func(vals, gammas=None,
                 ax.set_xscale('log')
                 ax.set_xlim((1e-3, 1e3))
 
+    plt.show()
+
 def plot_condition_number(*args, percentile=0, **kwargs):
     if type(percentile) in (int, float):
         l_percentile, u_percentile = percentile, 1 - percentile
@@ -371,12 +395,7 @@ def plot_determinant(vals, gammas=None):
     This fucntion uses the (not so established) notion of a "generalized determinant" for non-quadratic, and non-full rank matrixes: the product of all singular values that are non-zero.
     """
 
-    if type(vals) == tuple:   vals = load_data(*vals)
-    else:                     vals = vals.copy()
-    if gammas is None:        gammas = match_gammas(vals)
-    
-    # norm s1
-    vals /= vals[:, :, :, :1]
+    vals, gammas = prep_data(vals, gammas, norm_s1=True)
 
     # calculate the product of all ( non-zero singular values / maximum singular value )
     vals[vals==0] = 1

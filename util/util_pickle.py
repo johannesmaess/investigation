@@ -10,11 +10,10 @@ def save_data(model_tag, data_tag, data):
     with open(path, 'wb') as handle:
         pickle.dump(data, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
-    for d, l in zip(data, load_data(model_tag, data_tag)):
-        assert(np.all(d == l))
-
 def load_data(model_tag, data_tag):
     path = os.path.join(PICKLE_PATH, model_tag, f'{data_tag}.pickle')
+    if not os.path.exists(path):
+        return False
     with open(path, 'rb') as handle:
         data_loaded = pickle.load(handle)
     return data_loaded

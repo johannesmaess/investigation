@@ -4,10 +4,10 @@ from tqdm import tqdm
 import numpy as np
 from numpy.linalg import eig, svd
 
-from util.util_data_summary import pretty_num
+from util.util_data_summary import pretty_num, prep_data
 from util.common import HiddenPrints
 from util.naming import *
-from util.util_pickle import load_data
+from util.util_pickle import load_data, save_data
 
 import torch
 
@@ -350,7 +350,7 @@ def calc_vals(M, num_vals, return_vecs=False, svd_mode=True, abs_vals=False):
     # return sorted vals and vecs
     return (vals[order], np.array(vecs).T[order] if return_vecs else None)
 
-def calc_vals_batch(matrices, num_vals='auto', return_vecs=False, svd_mode=True, abs_vals=False, tqdm_for='matrix', save_for=None, save_func=None):
+def calc_vals_batch(matrices=None, num_vals='auto', return_vecs=False, svd_mode=True, abs_vals=False, tqdm_for='point', pickle_key=None, overwrite=False):
     """
     Wraps around calc_evals to make calls for multiple weights, and multiple reference points.
     Mostly useful for determining an efficient number of vals to compute per matrix, putting the results into uniform arrays, and its checks.
@@ -360,14 +360,30 @@ def calc_vals_batch(matrices, num_vals='auto', return_vecs=False, svd_mode=True,
     if tqdm_for=='matrix': itm = tqdm
     if tqdm_for=='point':  itp = tqdm
     if tqdm_for=='gamma':  itg = tqdm
-    # save intermediate progress
-    sg, sp, sm = [lambda x: 0]*3
-    if save_for=='matrix': sm = lambda vals: print(f"Saving intermediate result. {i}/{len(matrices)}")              or save_func(vals)
-    if save_for=='point':  sp = lambda vals: print(f"Saving intermediate result. {j}/{len(matrices_per_weight)}")   or save_func(vals)
-    if save_for=='gamma':  sg = lambda vals: print(f"Saving intermediate result. {k}/{len(matrices_per_point)}")    or save_func(vals)
+
+    if pickle_key is not None:
+        mkey, dkey = pickle_key
+
+        # try loading the data
+        if not overwrite:
+            vals = load_data(mkey, dkey.replace('LRP', 'svals'))
+            if vals is not False:
+                if matrices is not None: assert vals.shape[:3] == matrices.shape[:3], "Found svals in storage, but they do not match the passed matrices."
+                return vals
+
+        # if matrices are not passed, try to load them
+        if matrices is None:
+            matrices = load_data(mkey, dkey.replace('LRP', 'svals'))
+            assert matrices!=False, "matrices are not passed, and can not be loaded from storage."
+
+        # for saving the svals
+        save_func = lambda x: save_data(mkey, dkey.replace('LRP', 'svals'), x)
+    else:
+        save_func = lambda x: 0
+        assert matrices is not None, "Neither the matrices, nor a key for loading them from storage is passed."
 
     n_weights, n_points, n_gammas = matrices.shape[:3]
-    assert len(matrices[0, 0, 0].shape) == 2, "'matrices' should contain 2D arrays (np.ndarray or scipy.coo_array), nested in a 2D structure"
+    assert matrices[0, 0, 0].ndim == 2, "'matrices' should contain 2D arrays (np.ndarray or scipy.coo_array), nested in a 3D structure"
 
     if abs_vals or svd_mode: dtype=np.float
     else:                    dtype=np.cfloat
@@ -406,10 +422,8 @@ def calc_vals_batch(matrices, num_vals='auto', return_vecs=False, svd_mode=True,
                     computed_evals[i, j, k, :len(evals)] = evals
                     if return_vecs: computed_evecs[i, j, k, :len(evecs)] = evecs
 
+                save_func(computed_evals)
 
-                    sg(computed_evals)
-                sp(computed_evals)
-            sm(computed_evals)
     except KeyboardInterrupt:
         print("Received Interrupt. Stop computation, return incomplete result.")
 
@@ -420,7 +434,7 @@ def calc_vals_batch(matrices, num_vals='auto', return_vecs=False, svd_mode=True,
         if return_vecs and not np.any(np.imag(computed_evecs)):
             computed_evecs = np.real(computed_evecs)
 
-    if save_func: save_func(computed_evals)
+    save_func(computed_evals)
 
     return (computed_evals, computed_evecs if return_vecs else None)
 
@@ -476,14 +490,12 @@ def plot_vals_lineplot(vals, gammas=None,
                 norm_g0=False,
                 # spectra mode: one line represents one spectra. one spectra per gamma.
                 spectra=False, 
+                # dice: restrict which weights, points, gammas, and svals get plotted.
+                dice=(),
                 ):
     """
     Plots the evolution of Eigenvalues with increasing gammas in a lineplot.
     """
-
-    if type(vals) == tuple:   vals = load_data(*vals)
-    else:                     vals = vals.copy()
-    if gammas is None:        gammas = match_gammas(vals)
 
     if spectra:
         ylabel='$\sigma_i(\gamma)$'
@@ -491,16 +503,11 @@ def plot_vals_lineplot(vals, gammas=None,
     else:
         xlabel = '$\gamma$'
 
-    assert not (norm_g0 and norm_s1)
-    # divide every spectra by its first singular value
-    if norm_s1: 
-        vals /= vals[:, :, :, :1]
-        ylabel='$\\frac{ \sigma_i(\gamma) }{ \sigma_1(\gamma) }$'
-    # divide every (n-th singular) value by (the n-th singular value at gamma=0)
-    if norm_g0: 
-        vals /= vals[:, :, :1, :]
-        ylabel='$\\frac{ \sigma_i(\gamma) }{ \sigma_i(0) }$'
+    vals, gammas = prep_data(vals, gammas, norm_g0=norm_g0, norm_s1=norm_s1, dice=dice)
+    if norm_s1:  ylabel='$\\frac{ \sigma_i(\gamma) }{ \sigma_1(\gamma) }$'
+    if norm_g0:  ylabel='$\\frac{ \sigma_i(\gamma) }{ \sigma_i(0) }$'
 
+    # plot one line per spectra
     if spectra:
         vals = np.transpose(vals, (0,1,3,2))
         vals = vals[:, :, np.any(vals, axis=(0,1,3)), :]
@@ -513,7 +520,7 @@ def plot_vals_lineplot(vals, gammas=None,
     n_ax_dict = {
         'in total': (1, 1),
         'weight': (1, vals.shape[0]),
-        'point': vals.shape[:2]
+        'point': (vals.shape[1], vals.shape[0])
     }
     assert one_plot_per in ['point', 'weight', 'in total']
     n_ax = n_ax_dict[one_plot_per]
@@ -551,7 +558,7 @@ def plot_vals_lineplot(vals, gammas=None,
     if figsize is None: 
         figsize = (20, 10) if n_ax==(1,1) else (5*n_ax[1], 3*n_ax[0])
     fig, axs = plt.subplots(*n_ax, figsize=figsize, sharey=sharey)
-    axs, ax_i, ax = np.array(axs).flatten(), -1, None
+    axs, ax_i, ax = np.array(axs).T.flatten(), -1, None
 
     if title is not None:
         fig.suptitle(title)
@@ -693,7 +700,7 @@ def plot_vals_lineplot(vals, gammas=None,
         return fig, axs
 
 
-def plot_multiplicative_change(vals, gammas=None, hmean=False, normalize=False, **passed_kwargs):
+def plot_multiplicative_change(vals, gammas=None, hmean=False, end_at_0=False, **passed_kwargs):
     kwargs = {
         "ylabel": "Multiplicative change",
         "title": "Multiplicative change per Singular value. Shows which Singular values decrease fastest relative to their size. Blue are biggest Svals. Red smallest.",
@@ -703,26 +710,19 @@ def plot_multiplicative_change(vals, gammas=None, hmean=False, normalize=False, 
         "colormap": "seismic",
     }
     for k,v in passed_kwargs.items(): kwargs[k] = v
-
-    if type(vals) == tuple:   vals = load_data(*vals)
-    else:                     vals = vals.copy()
-    if gammas is None:        gammas = match_gammas(vals)
-        
-    if normalize:
-        vals = vals - vals[:, :, -1:, :]
         
     with HiddenPrints():
-        change = vals / vals[:, :, :1, :] # potential divide by 0
+        change, gammas = prep_data(vals, gammas, end_at_0=end_at_0, norm_g0=True)
     
-    if normalize and kwargs['yscale']=='log': change += 0.01
+    if end_at_0 and kwargs['yscale']=='log': change += 0.01
     
     # calculate harmonic mean over...
     if hmean=='points': 
-        if normalize: 
-            change[:, :, -1] = 1 # the entries for gamma=inf are normalized to 0. The hmean can not be calculated for 0 entries.
+        if end_at_0: 
+            change[:, :, -1] = 1 # the entries for gamma=inf are end_at_0d to 0. The hmean can not be calculated for 0 entries.
             change = np.clip(change, a_min=1e-3, a_max=None)
         change = stats.hmean(change, axis=1, keepdims=True, nan_policy='omit')
-        if normalize: 
+        if end_at_0: 
             change[:, :, -1] = 0 # We thus adopt the policy hmean(..., 0, ...) = 0.
     
     return plot_vals_lineplot(change, gammas, **kwargs)
