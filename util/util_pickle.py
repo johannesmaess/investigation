@@ -1,6 +1,7 @@
 import pickle
 import numpy as np
 import os
+import glob
 from tqdm import tqdm
 
 from util.naming import PICKLE_PATH
@@ -10,7 +11,29 @@ def save_data(model_tag, data_tag, data):
     with open(path, 'wb') as handle:
         pickle.dump(data, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
-def load_data(model_tag, data_tag):
+def load_data(model_tag, data_tag, partitioned=False):
+    if partitioned:
+        path_regex = os.path.join(PICKLE_PATH, model_tag, f'{data_tag}__partition*')    
+        matches = sorted(list(glob.glob(path_regex)))
+        ws = sorted(list(set([m[:-11] for m in matches])))
+        num_ps = len(set([m[-10:-7] for m in matches]))
+
+        res = []
+        for w in ws:
+            matches_w = sorted(list(glob.glob(f'{w}*')))
+            assert len(matches_w) == num_ps, f"Not same number of points for all ws: {len(matches_w)} != {num_ps}"
+
+            r = []
+            for m in matches_w:
+                with open(m, 'rb') as handle:
+                    r.append(pickle.load(handle))
+
+            r = np.concatenate(r, axis=1)
+            print(r.shape)
+            res.append(r)
+        
+        return np.concatenate(res, axis=0)
+    
     path = os.path.join(PICKLE_PATH, model_tag, f'{data_tag}.pickle')
     if not os.path.exists(path):
         return False

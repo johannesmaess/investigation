@@ -330,8 +330,13 @@ def calc_vals(M, num_vals, return_vecs=False, svd_mode=True, abs_vals=False):
 
         if not svd_mode:     vals, vecs    = eigs(M, k=num_vals, which="LM")
         else:            
-            if return_vecs: vecs, vals, _ = svds(M, k=num_vals, which="LM", return_singular_vectors='u'  )
-            else:                  vals   = svds(M, k=num_vals, which="LM", return_singular_vectors=False)
+            # computation of smallest svals by passing negative k:
+            # issue with argpack: doesnt converge sometimes
+            # issue with propack: how many? sometimes last one is 0.
+            if num_vals < 0: which="SM"; num_vals = -num_vals
+            else:            which="LM"
+            if return_vecs: vecs, vals, _ = svds(M, k=num_vals, which=which, return_singular_vectors='u'  )
+            else:                  vals   = svds(M, k=num_vals, which=which, return_singular_vectors=False)
     elif type(M) is np.ndarray:
         if np.any(np.isnan(M)):
             print(M)
@@ -350,10 +355,16 @@ def calc_vals(M, num_vals, return_vecs=False, svd_mode=True, abs_vals=False):
     # return sorted vals and vecs
     return (vals[order], np.array(vecs).T[order] if return_vecs else None)
 
-def calc_vals_batch(matrices=None, num_vals='auto', return_vecs=False, svd_mode=True, abs_vals=False, tqdm_for='point', pickle_key=None, overwrite=False):
+def calc_vals_batch(matrices=None, num_vals='auto', return_vecs=False, svd_mode=True, abs_vals=False, tqdm_for='point', pickle_key=None, overwrite=False, partition=False):
     """
     Wraps around calc_evals to make calls for multiple weights, and multiple reference points.
     Mostly useful for determining an efficient number of vals to compute per matrix, putting the results into uniform arrays, and its checks.
+
+    Tries to load the previously computed result first.
+
+    overwrite - Don't load previous result. Compute and overwrite it.
+    partition = (i, j) - only the i'th weight and j'th poitn are computes, and saved with appendix __wi__pj .
+
     """
     # display progress util
     itg, itp, itm = [lambda x: x]*3
@@ -363,17 +374,34 @@ def calc_vals_batch(matrices=None, num_vals='auto', return_vecs=False, svd_mode=
 
     if pickle_key is not None:
         mkey, dkey = pickle_key
+        ind = dkey.find('__')
+
+        # key for loading LRP matrices: "LRP__..."
+        dkey_lrp = 'LRP' + dkey[ind:]
+
+        # if passed key is of form "__..." default to "svals__..."
+        if num_vals == 'auto':
+            dkey = 'svals' + dkey[ind:]
+        elif type(num_vals) is int:
+            dkey = f'svals{num_vals}' + dkey[ind:]
+        else:
+            assert 0, f"Invalid num_vals {num_vals}"
+
+        # mark which partition
+        if partition:
+            w,p = partition
+            dkey += f"__partition_{w:03d}_{p:03d}"
 
         # try loading the data
         if not overwrite:
-            vals = load_data(mkey, dkey.replace('LRP', 'svals'))
+            vals = load_data(mkey, dkey)
             if vals is not False:
                 if matrices is not None: assert vals.shape[:3] == matrices.shape[:3], "Found svals in storage, but they do not match the passed matrices."
                 return vals
 
         # if matrices are not passed, try to load them
         if matrices is None:
-            matrices = load_data(mkey, dkey.replace('svals', 'LRP'))
+            matrices = load_data(mkey, dkey_lrp)
             assert matrices is not False, "matrices are not passed, and can not be loaded from storage."
 
         # for saving the svals
@@ -407,22 +435,30 @@ def calc_vals_batch(matrices=None, num_vals='auto', return_vecs=False, svd_mode=
                 max_rank_per_matrix[i,j] = min([np.sum(np.any(W, axis=0)), np.sum(np.any(W, axis=1))])
 
     # valculate the number of vals to be requested per matrix
-    vals_per_matrix = max_rank_per_matrix if num_vals=='auto' else np.clip(max_rank_per_matrix, a_min=None, a_max=num_vals)
+    vals_per_matrix = max_rank_per_matrix if num_vals=='auto' else np.clip(max_rank_per_matrix, a_min=None, a_max=np.abs(num_vals))
 
     # initialize stores
+    if partition: n_weights, n_points = 1, 1
     computed_evals =                 np.zeros((n_weights, n_points, n_gammas, vals_per_matrix.max())         , dtype=dtype)
     if return_vecs: computed_evecs = np.zeros((n_weights, n_points, n_gammas, vals_per_matrix.max(), vec_len), dtype=dtype)
 
     # calculate decomposition
     try:
-        for i, matrices_per_weight in itm(enumerate(matrices)):
-            for j, matrices_per_point in itp(enumerate(matrices_per_weight)):
-                for k, matrix_per_gamma in itg(enumerate(matrices_per_point)):
+        if partition:
+            matrices_per_point = matrices[i, j]
+            for k, matrix_per_gamma in itg(enumerate(matrices_per_point)):
                     evals, evecs = calc_vals(matrix_per_gamma, num_vals=vals_per_matrix[i,j], return_vecs=return_vecs)
-                    computed_evals[i, j, k, :len(evals)] = evals
+                    computed_evals[0, 0, k, :len(evals)] = evals
                     if return_vecs: computed_evecs[i, j, k, :len(evecs)] = evecs
+        else:         
+            for i, matrices_per_weight in itm(enumerate(matrices)):
+                for j, matrices_per_point in itp(enumerate(matrices_per_weight)):
+                    for k, matrix_per_gamma in itg(enumerate(matrices_per_point)):
+                        evals, evecs = calc_vals(matrix_per_gamma, num_vals=vals_per_matrix[i,j], return_vecs=return_vecs)
+                        computed_evals[i, j, k, :len(evals)] = evals
+                        if return_vecs: computed_evecs[i, j, k, :len(evecs)] = evecs
 
-                save_func(computed_evals)
+                    save_func(computed_evals)
 
     except KeyboardInterrupt:
         print("Received Interrupt. Stop computation, return incomplete result.")
@@ -436,7 +472,9 @@ def calc_vals_batch(matrices=None, num_vals='auto', return_vecs=False, svd_mode=
 
     save_func(computed_evals)
 
-    return (computed_evals, computed_evecs if return_vecs else None)
+    if return_vecs: 
+        return computed_evals, computed_evecs
+    return computed_evals
 
 def calc_evals_batch(weights_list, points_list, gammas=np.linspace(0,1,201)[:-1], mode="forw recover activations", smart_gamma_func=None, output_layer_relevancies=None, return_matrices=False, num_vals_largest=None, return_evecs=False, abs_evals=False, svd_mode=False):
     """
