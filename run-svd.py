@@ -12,17 +12,16 @@ import sys
 
 if 'SGE_TASK_ID' in os.environ:
     sys.path.append("/home/johannes/Masterarbeit")
-    i_task = int(os.environ['SGE_TASK_ID']) - 1
+    i_task = int(os.environ['SGE_TASK_ID'])
     print(f"Task {i_task} of {n_tasks}.")
-    assert i_task < n_tasks
+    assert i_task <= n_tasks
 else:
     print("Running in non-parallel mode.")
-    i_task, n_tasks = 0, 1
+    i_task, n_tasks = 1, 1
+    
+if i_task < 4: assert 0 # todo delete!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 ### Imports ###
-%load_ext autoreload
-%autoreload 2
-
 import os
 from tqdm import tqdm
 import copy
@@ -51,10 +50,10 @@ data, target = first_mnist_batch()
 model_dict = load_mnist_v4_models()
 model_d3 = model_dict[d3_tag]
 
+print(i_task)
 
-# todo run on cluster
 if i_task==1:
-    pickle_key = ('d3', 'svals__individual_layer__gammas5')
+    pickle_key = ('d3', 'svals__individual_layer__gammas40')
     mat_funcs = [partial(LRP_global_mat, model=model_d3, l_inp=l_inp, l_out=l_out, delete_unactivated_subnetwork=True) for l_inp, l_out in [(2, 3), (4, 5), (7,8), (9, 10), (11, 12)]]
 if i_task==2:
     pickle_key = ('d3', 'svals__m1_to_1___cascading_gamma__gammas40')
@@ -62,11 +61,16 @@ if i_task==2:
 
 # eps 0
 if i_task==3:
-    pickle_key = ('d3', 'svals__m1_to_1___cascading_gamma__gammas40__eps0')
+    pickle_key = ('d3', 'svals__individual_layer__gammas40__eps0')
     mat_funcs = [partial(LRP_global_mat, eps=0, model=model_d3, l_inp=l_inp, l_out=l_out, delete_unactivated_subnetwork=True) for l_inp, l_out in [(2, 3), (4, 5), (7,8), (9, 10), (11, 12)]]
 if i_task==4:
     pickle_key = ('d3', 'svals__m1_to_1___cascading_gamma__gammas40__eps0')
     mat_funcs = [partial(LRP_global_mat, eps=0, model=model_d3, l_ub=l_ub, l_inp=1, l_out=-2, delete_unactivated_subnetwork=True) for l_ub in d3_after_conv_layer[:-1]]
 
+print(pickle_key, np.array(mat_funcs).shape)
+
+print("Computing mats...")
 calc_mats_batch_functional(mat_funcs, gammas40, data[:20], pickle_key=pickle_key)
-calc_vals_batch(pickle_key=pickle_key)
+print("Done with mats. Computing Svals...")
+calc_vals_batch(pickle_key=pickle_key, overwrite=True)
+print("Done with Svals.")

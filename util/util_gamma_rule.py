@@ -373,8 +373,8 @@ def calc_vals_batch(matrices=None, num_vals='auto', return_vecs=False, svd_mode=
 
         # if matrices are not passed, try to load them
         if matrices is None:
-            matrices = load_data(mkey, dkey.replace('LRP', 'svals'))
-            assert matrices!=False, "matrices are not passed, and can not be loaded from storage."
+            matrices = load_data(mkey, dkey.replace('svals', 'LRP'))
+            assert matrices is not False, "matrices are not passed, and can not be loaded from storage."
 
         # for saving the svals
         save_func = lambda x: save_data(mkey, dkey.replace('LRP', 'svals'), x)
