@@ -2,8 +2,8 @@
 #$ -q all.q
 #$ -cwd
 #$ -V
-#$ -t 1
-n_tasks = 1
+#$ -t 1-4
+n_tasks = 4
 
 ### Configure on local / Qsub system ###
 import os
@@ -53,7 +53,20 @@ model_d3 = model_dict[d3_tag]
 
 
 # todo run on cluster
-pickle_key = ('d3', 'svals__individual_layer__gammas5')
-mat_funcs = [partial(LRP_global_mat, model=model_d3, l_inp=l_inp, l_out=l_out, delete_unactivated_subnetwork=True) for l_inp, l_out in [(2, 3), (4, 5), (7,8), (9, 10), (11, 12)]]
+if i_task==1:
+    pickle_key = ('d3', 'svals__individual_layer__gammas5')
+    mat_funcs = [partial(LRP_global_mat, model=model_d3, l_inp=l_inp, l_out=l_out, delete_unactivated_subnetwork=True) for l_inp, l_out in [(2, 3), (4, 5), (7,8), (9, 10), (11, 12)]]
+if i_task==2:
+    pickle_key = ('d3', 'svals__m1_to_1___cascading_gamma__gammas40')
+    mat_funcs = [partial(LRP_global_mat, model=model_d3, l_ub=l_ub, l_inp=1, l_out=-2, delete_unactivated_subnetwork=True) for l_ub in d3_after_conv_layer[:-1]]
+
+# eps 0
+if i_task==3:
+    pickle_key = ('d3', 'svals__m1_to_1___cascading_gamma__gammas40__eps0')
+    mat_funcs = [partial(LRP_global_mat, eps=0, model=model_d3, l_inp=l_inp, l_out=l_out, delete_unactivated_subnetwork=True) for l_inp, l_out in [(2, 3), (4, 5), (7,8), (9, 10), (11, 12)]]
+if i_task==4:
+    pickle_key = ('d3', 'svals__m1_to_1___cascading_gamma__gammas40__eps0')
+    mat_funcs = [partial(LRP_global_mat, eps=0, model=model_d3, l_ub=l_ub, l_inp=1, l_out=-2, delete_unactivated_subnetwork=True) for l_ub in d3_after_conv_layer[:-1]]
+
 calc_mats_batch_functional(mat_funcs, gammas40, data[:20], pickle_key=pickle_key)
-calc_vals_batch(pickle_key=pickle_key, overwrite=True)
+calc_vals_batch(pickle_key=pickle_key)
