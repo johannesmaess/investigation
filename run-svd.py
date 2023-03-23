@@ -18,8 +18,6 @@ if 'SGE_TASK_ID' in os.environ:
 else:
     print("Running in non-parallel mode.")
     i_task, n_tasks = 1, 1
-    
-if i_task < 4: assert 0 # todo delete!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 ### Imports ###
 import os
