@@ -488,6 +488,8 @@ def plot_vals_lineplot(vals, gammas=None,
                 norm_s1=False, 
                 # divide every (n-th singular) value by (the n-th singular value at gamma=0)
                 norm_g0=False,
+                # substract from every (n-th singular) value (the n-th singular value at gamma=inf)
+                end_at_0=False,
                 # spectra mode: one line represents one spectra. one spectra per gamma.
                 spectra=False, 
                 # dice: restrict which weights, points, gammas, and svals get plotted.
@@ -503,7 +505,9 @@ def plot_vals_lineplot(vals, gammas=None,
     else:
         xlabel = '$\gamma$'
 
-    vals, gammas = prep_data(vals, gammas, norm_g0=norm_g0, norm_s1=norm_s1, dice=dice)
+    vals, gammas = prep_data(vals, gammas, norm_g0=norm_g0, norm_s1=norm_s1, end_at_0=end_at_0, dice=dice)
+    if end_at_0 and yscale=='log': vals += 1e-5
+
     if norm_s1:  ylabel='$\\frac{ \sigma_i(\gamma) }{ \sigma_1(\gamma) }$'
     if norm_g0:  ylabel='$\\frac{ \sigma_i(\gamma) }{ \sigma_i(0) }$'
 
@@ -517,15 +521,6 @@ def plot_vals_lineplot(vals, gammas=None,
     if num_vals_largest:
         vals = vals[:, :, :, :num_vals_largest]
 
-    n_ax_dict = {
-        'in total': (1, 1),
-        'weight': (1, vals.shape[0]),
-        'point': (vals.shape[1], vals.shape[0])
-    }
-    assert one_plot_per in ['point', 'weight', 'in total']
-    n_ax = n_ax_dict[one_plot_per]
-
-    # 
     if type(xlim) == int:
         x_lim_lower = {'linear':0, 'log': max(1e-3, gammas[0])*.9}[xscale]
         xlim = [x_lim_lower, xlim]
@@ -554,6 +549,12 @@ def plot_vals_lineplot(vals, gammas=None,
     elif type(ylim) != list and ylim is not None:
         print('Warn: Invalid ylim: {ylim}. Setting ylim to None.')
         ylim = None
+
+    if one_plot_per=='in total': n_ax = (1,1)
+    elif one_plot_per=='weight': n_ax = (1, vals.shape[0])
+    elif one_plot_per=='point': 
+        if vals.shape[0] == 1:   n_ax = (1, vals.shape[1])
+        else:                    n_ax = (vals.shape[1], vals.shape[0])
 
     if figsize is None: 
         figsize = (20, 10) if n_ax==(1,1) else (5*n_ax[1], 3*n_ax[0])

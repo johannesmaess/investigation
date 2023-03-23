@@ -240,7 +240,7 @@ def calc_mats_batch_functional(mat_funcs, gammas, points, tqdm_for='matrix', pic
     if pickle_key is not None:
         pickle_key = (pickle_key[0], pickle_key[1].replace('svals', 'LRP'))
         mats = load_data(*pickle_key)
-        if mats != False: return mats
+        if mats is not False: return mats
 
     itg, itp, itm = [lambda x: x]*3
     if tqdm_for=='matrix': itm = tqdm
