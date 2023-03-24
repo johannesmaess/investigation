@@ -37,7 +37,7 @@ def calc_norm_dict(matrices=None, svals=None, gammas=None, pickle_key=(), cs=Non
     """
     Returns a collection of useful norms, and bounds on the L2 norm in a dictionary.
     """
-    if svals == None: svals, gammas = prep_data(svals, gammas)
+    if svals == None: svals, gammas = prep_data(pickle_key, gammas)
     if matrices == None:
         mkey, dkey = pickle_key
         ind = dkey.find('__')
