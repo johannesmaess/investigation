@@ -20,8 +20,9 @@ def load_data(model_tag, data_tag, partitioned=False):
 
         res = []
         for w in ws:
+            print(w)
             matches_w = sorted(list(glob.glob(f'{w}*')))
-            assert len(matches_w) == num_ps, f"Not same number of points for all ws: {len(matches_w)} != {num_ps}"
+            assert len(matches_w) == num_ps, f"Not same number of points for all ws: {len(matches_w)} != {num_ps}. matches: {matches_w}"
 
             r = []
             for m in matches_w:
@@ -29,7 +30,6 @@ def load_data(model_tag, data_tag, partitioned=False):
                     r.append(pickle.load(handle))
 
             r = np.concatenate(r, axis=1)
-            print(r.shape)
             res.append(r)
         
         return np.concatenate(res, axis=0)

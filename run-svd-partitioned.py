@@ -49,7 +49,7 @@ model_d3 = model_dict[d3_tag]
 print(i_task)
 
 num = i_task % 100
-partition = int(num / 5), num % 5
+partition = num % 5, int(num / 5)
 
 if 0 < i_task <= 100:
     pickle_key = ('d3', 'svals__individual_layer__gammas40')

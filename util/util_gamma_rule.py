@@ -445,11 +445,11 @@ def calc_vals_batch(matrices=None, num_vals='auto', return_vecs=False, svd_mode=
     # calculate decomposition
     try:
         if partition:
-            matrices_per_point = matrices[i, j]
+            matrices_per_point = matrices[w,p]
             for k, matrix_per_gamma in itg(enumerate(matrices_per_point)):
-                    evals, evecs = calc_vals(matrix_per_gamma, num_vals=vals_per_matrix[i,j], return_vecs=return_vecs)
+                    evals, evecs = calc_vals(matrix_per_gamma, num_vals=vals_per_matrix[w,p], return_vecs=return_vecs)
                     computed_evals[0, 0, k, :len(evals)] = evals
-                    if return_vecs: computed_evecs[i, j, k, :len(evecs)] = evecs
+                    if return_vecs: computed_evecs[0, 0, k, :len(evecs)] = evecs
         else:         
             for i, matrices_per_weight in itm(enumerate(matrices)):
                 for j, matrices_per_point in itp(enumerate(matrices_per_weight)):
