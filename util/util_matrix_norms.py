@@ -1,5 +1,7 @@
 import numpy as np
 from util.naming import *
+from util.util_data_summary import prep_data
+from util.util_pickle import load_data
 
 
 def mat_norm_batch(per_weight, p):
@@ -31,10 +33,18 @@ def nonzero_rows_cols_batch(per_weight):
     def uni(arr): return len(np.unique(arr))
     return np.array([[[[uni(mat.row), uni(mat.col)] for mat in per_gamma] for per_gamma in per_point] for per_point in per_weight]).transpose((3,0,1,2))
 
-def calc_norm_dict(matrices, svals, gammas=None, cs=None, filter_size=None):
+def calc_norm_dict(matrices=None, svals=None, gammas=None, pickle_key=(), cs=None, filter_size=None):
     """
     Returns a collection of useful norms, and bounds on the L2 norm in a dictionary.
     """
+    if svals == None: svals, gammas = prep_data(svals, gammas)
+    if matrices == None:
+        mkey, dkey = pickle_key
+        ind = dkey.find('__')
+        # key for loading LRP matrices: "LRP__..."
+        dkey_lrp = 'LRP' + dkey[ind:]
+        matrices = load_data(mkey, dkey_lrp)
+
     assert svals.shape[0] == matrices.shape[0]  and svals.shape[2] == matrices.shape[2] # same number of weights and gammas
     n_points = min(matrices.shape[1], svals.shape[1])
 
