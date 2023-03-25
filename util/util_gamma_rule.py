@@ -405,7 +405,7 @@ def calc_vals_batch(matrices=None, num_vals='auto', return_vecs=False, svd_mode=
             assert matrices is not False, "matrices are not passed, and can not be loaded from storage."
 
         # for saving the svals
-        save_func = lambda x: save_data(mkey, dkey.replace('LRP', 'svals'), x)
+        save_func = lambda x: save_data(mkey, dkey, x)
     else:
         save_func = lambda x: 0
         assert matrices is not None, "Neither the matrices, nor a key for loading them from storage is passed."
@@ -481,6 +481,7 @@ def calc_vals_batch(matrices=None, num_vals='auto', return_vecs=False, svd_mode=
         if return_vecs and not np.any(np.imag(computed_evecs)):
             computed_evecs = np.real(computed_evecs)
 
+    print("Saving vals under key:", (mkey, dkey))
     save_func(computed_evals)
 
     if return_vecs: 

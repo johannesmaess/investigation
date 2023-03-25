@@ -7,7 +7,9 @@ from tqdm import tqdm
 from util.naming import PICKLE_PATH
 
 def save_data(model_tag, data_tag, data):
-    path = os.path.join(PICKLE_PATH, model_tag, f'{data_tag}.pickle')
+    path = os.path.join(PICKLE_PATH, model_tag)
+    if not os.path.exists(path): os.mkdir(path)
+    path = os.path.join(path, f'{data_tag}.pickle')
     with open(path, 'wb') as handle:
         pickle.dump(data, handle, protocol=pickle.HIGHEST_PROTOCOL)
 

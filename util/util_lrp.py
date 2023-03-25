@@ -252,6 +252,7 @@ def calc_mats_batch_functional(mat_funcs, gammas, points, tqdm_for='matrix', pic
 
     # save result
     if pickle_key is not None:
+        print("Matrices vals under key:", pickle_key)
         save_data(*pickle_key, mats)
 
     return mats
