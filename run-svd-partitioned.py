@@ -2,8 +2,8 @@
 #$ -q all.q
 #$ -cwd
 #$ -V
-#$ -t 1-400
-n_tasks = 400
+#$ -t 1-3
+n_tasks = 10
 
 ### Configure on local / Qsub system ###
 import os
@@ -34,7 +34,7 @@ else:
 
 from util.util_gamma_rule import calc_vals_batch
 
-# from util.util_lrp import LRP_global_mat, calc_mats_batch_functional
+from util.util_lrp import LRP_global_mat, calc_mats_batch_functional
 from util.util_cnn import load_mnist_v4_models, first_mnist_batch
 from util.util_data_summary import *
 from util.util_pickle import *
@@ -44,32 +44,32 @@ from util.naming import *
 
 data, target = first_mnist_batch()
 model_dict = load_mnist_v4_models()
-model_d3 = model_dict[d3_tag]
 
-print(i_task)
+# model_d3 = model_dict[d3_tag]
+s4f3 = model_dict[s4f3_tag]
+# s4f5 = model_dict[s4f5_tag]
+# s4f7 = model_dict[s4f7_tag]
 
-num = i_task % 100
-partition = num % 5, int(num / 5)
 
-if 0 < i_task <= 100:
-    pickle_key = ('d3', 'svals__individual_layer__gammas40')
-    # mat_funcs = [partial(LRP_global_mat, model=model_d3, l_inp=l_inp, l_out=l_out, delete_unactivated_subnetwork=True) for l_inp, l_out in [(2, 3), (4, 5), (7,8), (9, 10), (11, 12)]]
-if 100 < i_task <= 200:
-    pickle_key = ('d3', 'svals__m1_to_1___cascading_gamma__gammas40')
-    # mat_funcs = [partial(LRP_global_mat, model=model_d3, l_ub=l_ub, l_inp=1, l_out=-2, delete_unactivated_subnetwork=True) for l_ub in d3_after_conv_layer[:-1]]
+# partition = i_task % 5, int(i_task / 5)
 
-# eps 0
-if 200 < i_task <= 300:
-    pickle_key = ('d3', 'svals__individual_layer__gammas40__eps0')
-    # mat_funcs = [partial(LRP_global_mat, eps=0, model=model_d3, l_inp=l_inp, l_out=l_out, delete_unactivated_subnetwork=True) for l_inp, l_out in [(2, 3), (4, 5), (7,8), (9, 10), (11, 12)]]
-if 300 < i_task <= 400:
-    pickle_key = ('d3', 'svals__m1_to_1___cascading_gamma__gammas40__eps0')
-    # mat_funcs = [partial(LRP_global_mat, eps=0, model=model_d3, l_ub=l_ub, l_inp=1, l_out=-2, delete_unactivated_subnetwork=True) for l_ub in d3_after_conv_layer[:-1]]
 
-print(pickle_key, partition)
+if i_task==1:
+    pickle_key = ('s4f3', 'svals__m1_to_1___cascading_gamma__gammas40')
+    mat_funcs = [partial(LRP_global_mat, model=s4f3, l_ub=l_ub, l_inp=1, l_out=-2, delete_unactivated_subnetwork=True) for l_ub in s4_after_conv_layer]
 
-# print("Computing mats...")
-# calc_mats_batch_functional(mat_funcs, gammas40, data[:20], pickle_key=pickle_key)
+if i_task==2:
+    pickle_key = ('s4f3', 'svals__m1_to_1___inverted_cascading_gamma__gammas40')
+    mat_funcs = [partial(LRP_global_mat, model=s4f3, l_lb=l_ub-2, l_inp=1, l_out=-2, delete_unactivated_subnetwork=True) for l_ub in s4_after_conv_layer]
+
+if i_task==3:
+    pickle_key = ('s4f3', 'svals__individual_layer__gammas40')
+    mat_funcs = [partial(LRP_global_mat, model=s4f3, l_inp=l_out-1, l_out=l_out, delete_unactivated_subnetwork=True) for l_out in s4_after_conv_layer]
+
+print(pickle_key, len(mat_funcs))
+
+print("Computing mats...")
+calc_mats_batch_functional(mat_funcs, gammas40, data[:20], pickle_key=pickle_key)
 print("Done with mats. Computing Svals...")
-calc_vals_batch(pickle_key=pickle_key, overwrite=True, partition=partition)
+calc_vals_batch(pickle_key=pickle_key, overwrite=True)#, partition=partition)
 print("Done with Svals.")

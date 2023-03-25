@@ -1,6 +1,6 @@
 import numpy as np
 from util.naming import *
-from util.util_data_summary import prep_data
+from util.util_data_summary import prep_data, condition_number
 from util.util_pickle import load_data
 
 
@@ -61,14 +61,6 @@ def calc_norm_dict(matrices=None, svals=None, gammas=None, pickle_key=(), cs=Non
     linf = mat_norm_batch(matrices, p=np.inf)
     frobenius = mat_norm_batch(matrices, p='frobenius')
 
-    # predict l1 norm by just calculating the coefficient c once
-    if cs is not None: 
-        gammas = match_gammas(svals)
-        cs = cs[:, :, None]
-        gammas = gammas[None, None, :]
-        l1_analytically = 1 + 2*cs / (1 - cs + gammas)
-        a['l1_analytically'] = l1_analytically
-
     frobenius_b = (svals**2).sum(axis=3)**.5
     rel_err = np.abs((frobenius - frobenius_b) / np.maximum(frobenius, frobenius_b)).max()
     assert rel_err < 0.01, f"Multiplicative difference in Frobenius norm calculation methods too high. {rel_err}"
@@ -87,9 +79,39 @@ def calc_norm_dict(matrices=None, svals=None, gammas=None, pickle_key=(), cs=Non
 
     sqrt_L1_Linf = np.sqrt(l1*linf)
     
-    norm_dict = {k:v for k,v in zip(["L1_lower", "L1_upper", "Linf_lower", "Linf_upper", "sqrt_L1_Linf", "L2", "L1", "L1_analytically", "Linf", "frobenius"], 
-                                (l1_lower, l1_upper, linf_lower, linf_upper, sqrt_L1_Linf, l2, l1, l1_analytically, linf, frobenius)) }
-
+    
+    
+    
+    norm_dict = {
+        "L2": l2,
+        "L1": l1,
+        "Linf": linf,
+        
+        # upper bounds on L2
+        "sqrt_L1_Linf": sqrt_L1_Linf, 
+        "frobenius": frobenius,
+        "L1_upper": l1_upper, 
+        "Linf_upper": linf_upper, 
+        
+        # lower bounds on L2
+        "L1_lower": l1_lower, 
+        "Linf_lower": linf_lower, 
+        
+        # condition number
+        "cond": condition_number(svals),
+        "cond_0_.1": condition_number(svals, percentile=(0,.1)),
+        "cond_0_.2": condition_number(svals, percentile=(0,.2)),
+    }
+    
+    
+    # predict l1 norm by just calculating the coefficient c once
+    if cs is not None: 
+        gammas = match_gammas(svals)
+        cs = cs[:, :, None]
+        gammas = gammas[None, None, :]
+        l1_analytically = 1 + 2*cs / (1 - cs + gammas)
+        
+        norm_dict["L1 analytically"] = l1_analytically
 
     if filter_size is not None:
         if filter_size == 'lrp':
@@ -99,6 +121,10 @@ def calc_norm_dict(matrices=None, svals=None, gammas=None, pickle_key=(), cs=Non
             filter_size = np.array(filter_size)
         
         norm_dict["Linf by L1"] = l1 * filter_size
-        norm_dict["sqrt_L1_Linf by L1"] = np.sqrt(1+filter_size) * l1
+        norm_dict["sqrt_L1_Linf by L1"] = np.sqrt(filter_size) * l1
+        
+        if cs is not None:
+            norm_dict["Linf by L1 analytically"] = filter_size * l1_analytically
+            norm_dict["sqrt_L1_Linf by L1 analytically"] = np.sqrt(filter_size) * l1_analytically
 
     return norm_dict

@@ -4,7 +4,7 @@ from tqdm import tqdm
 import numpy as np
 from numpy.linalg import eig, svd
 
-from util.util_data_summary import pretty_num, prep_data
+from util.util_data_summary import pretty_num, prep_data, dice_to_selectors
 from util.common import HiddenPrints
 from util.naming import *
 from util.util_pickle import load_data, save_data
@@ -409,6 +409,17 @@ def calc_vals_batch(matrices=None, num_vals='auto', return_vecs=False, svd_mode=
     else:
         save_func = lambda x: 0
         assert matrices is not None, "Neither the matrices, nor a key for loading them from storage is passed."
+        
+    if type(partition) is int:
+        n = len(matrices)
+        partiton = int(partition / n), partition % n
+    if type(partition) is tuple:
+        assert len(partition) == 2 \
+            and 0 <= partiton[0] < len(matrices) \
+            and 0 <= partiton[1] < len(matrices[0]), \
+            f"Invalid partition {partition}."
+    else:
+        assert partition is None, "Pass integer or tuple as partition."
 
     n_weights, n_points, n_gammas = matrices.shape[:3]
     assert matrices[0, 0, 0].ndim == 2, "'matrices' should contain 2D arrays (np.ndarray or scipy.coo_array), nested in a 3D structure"
@@ -532,6 +543,9 @@ def plot_vals_lineplot(vals, gammas=None,
                 spectra=False, 
                 # dice: restrict which weights, points, gammas, and svals get plotted.
                 dice=(),
+                
+                # put the matrices c value as text in the top right corner
+                annotate_c=None, # pass c values in same form as data
                 ):
     """
     Plots the evolution of Eigenvalues with increasing gammas in a lineplot.
@@ -544,6 +558,7 @@ def plot_vals_lineplot(vals, gammas=None,
         xlabel = '$\gamma$'
 
     vals, gammas = prep_data(vals, gammas, norm_g0=norm_g0, norm_s1=norm_s1, end_at_0=end_at_0, dice=dice)
+    selectors = dice_to_selectors(dice)
     if end_at_0 and yscale=='log': vals += 1e-5
 
     if norm_s1:  ylabel='$\\frac{ \sigma_i(\gamma) }{ \sigma_1(\gamma) }$'
@@ -585,7 +600,7 @@ def plot_vals_lineplot(vals, gammas=None,
     elif type(ylim) == tuple:
         ylim = list(ylim)
     elif type(ylim) != list and ylim is not None:
-        print('Warn: Invalid ylim: {ylim}. Setting ylim to None.')
+        print(f'Warn: Invalid ylim: {ylim}. Setting ylim to None.')
         ylim = None
 
     if one_plot_per=='in total': n_ax = (1,1)
@@ -698,8 +713,9 @@ def plot_vals_lineplot(vals, gammas=None,
                 labels = [f'Exp. {i+1}, Point {j+1}, Sval {k+1}' for k in range(Y.shape[1])]
                 labels = [f'Singular value {k+1}' for k in range(Y.shape[1])] # <- prettier, for Proposal plot
                 if tag_line is not None:
-                    assert len(tag_line) == len(labels), "Invalid labels per line passed."
-                    labels = tag_line
+                    tags = np.array(tag_line)[selectors[3]]
+                    assert len(tags) == len(labels), "Invalid labels per line passed."
+                    labels = tags
 
                 # If gammas are numerical, use them to determine x position of lines. If they are strings, plot evals in equal spacing, and label them with the 'gammas'
                 if np.any([type(g) is str for g in gammas]):
@@ -731,6 +747,12 @@ def plot_vals_lineplot(vals, gammas=None,
             if one_plot_per=='point': ax_show()
         if one_plot_per=='weight': ax_show()
     if one_plot_per=='in total': ax_show()
+    
+    if annotate_c is not None:
+        cs = annotate_c[selectors[0], selectors[1]]
+        for ax, c in zip(axs, cs.flatten()):
+            annot = "$c=$" + f"{ c*100-99 :0.3f}".lstrip('0')
+            ax.annotate(annot, xy=(0.75, 0.9), xycoords='axes fraction', fontsize=13)
 
     plt.subplots_adjust(hspace=0.3)
     if show:

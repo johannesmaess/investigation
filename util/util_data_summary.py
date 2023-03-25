@@ -7,6 +7,7 @@ from tqdm import tqdm
 from util.util_pickle import load_data
 from math import ceil, floor
 from util.naming import *
+from functools import partial
 
 def percentile(n):
     def percentile_(x):
@@ -65,6 +66,17 @@ def plot_hists_on_ax(ax, vals_for_point, gammas, bins = [0, 1e-5, 1e-4, 1e-3, 1e
             ax.set_xticks([])
             ax = divider.append_axes("bottom", size="100%", pad=0, sharey=ax)
 
+def dice_to_selectors(dice):
+    selectors = [slice(0, None)] * 4
+    for i, slic in enumerate(dice): 
+        if   type(slic) == list:  selectors[i] = slic
+        elif type(slic) == int:   selectors[i] = slice(0, slic)
+        elif type(slic) == tuple:
+            if slic == (): continue # select everything
+            selectors[i] = slice(*slic)
+        else: assert False, f"Invalid dice: {dice}"
+    return selectors
+            
 def prep_data(vals, gammas=None, norm_g0=False, norm_s1=False, end_at_0=False, dice=()):
     if type(vals) == tuple:   vals = load_data(*vals); assert vals is not False, "Could not load pickleid"
     else:                     vals = vals.copy()
@@ -84,15 +96,7 @@ def prep_data(vals, gammas=None, norm_g0=False, norm_s1=False, end_at_0=False, d
 
     # take dice of svals and gammas
     if dice != ():
-        selectors = [slice(0, None)] * 4
-        for i, slic in enumerate(dice): 
-            if   type(slic) == list:  selectors[i] = slic
-            elif type(slic) == int:   selectors[i] = slice(0, slic)
-            elif type(slic) == tuple:
-                if slic == (): continue # select everything
-                selectors[i] = slice(*slic)
-            else: assert False, f"Invalid dice: {dice}"
-
+        selectors = dice_to_selectors(dice)
         vals = vals[selectors[0], selectors[1], selectors[2], selectors[3]]
         gammas = gammas[selectors[2]]
 
@@ -369,25 +373,29 @@ def plot_sval_func(vals, gammas=None, dice=(),
                 ax.set_xlim((1e-3, 1e3))
 
     plt.show()
-
-def plot_condition_number(*args, percentile=0, **kwargs):
+    
+def condition_number_for_point(pvals, percentile=0):
     if type(percentile) in (int, float):
         l_percentile, u_percentile = percentile, 1 - percentile
     else:
         l_percentile, u_percentile = percentile
         u_percentile = 1 - u_percentile
-    
+
     assert l_percentile < u_percentile
+    l_idx = (pvals.shape[1] - 1) * l_percentile
+    u_idx = (pvals.shape[1] - 1) * u_percentile
 
-    def sval_func(pvals):
-        l_idx = (pvals.shape[1] - 1) * l_percentile
-        u_idx = (pvals.shape[1] - 1) * u_percentile
+    l_idx = int(floor(l_idx))
+    u_idx = int(ceil(u_idx))
 
-        l_idx = int(floor(l_idx))
-        u_idx = int(ceil(u_idx))
-        
-        return pvals[:, l_idx] / pvals[:, u_idx]
-    
+    return pvals[:, l_idx] / pvals[:, u_idx]
+
+def condition_number(vals, percentile=0):
+    vals, _ = prep_data(vals)
+    return np.stack([np.stack([condition_number_for_point(pvals[:, np.any(pvals>0, axis=0)], percentile) for pvals in wvals]) for wvals in vals])
+
+def plot_condition_number(*args, percentile=0, **kwargs):
+    sval_func = partial(condition_number_for_point, percentile=percentile)
     return plot_sval_func(*args, sval_func=sval_func, **kwargs)
 
 def plot_determinant(vals, gammas=None):

@@ -235,12 +235,13 @@ def LRP_global_mat(model, point, gamma, l_lb = -1000, l_ub = 1000, delete_unacti
 
     return coo_array(LRP_backward.detach().numpy())
 
-def calc_mats_batch_functional(mat_funcs, gammas, points, tqdm_for='matrix', pickle_key=None):
+def calc_mats_batch_functional(mat_funcs, gammas, points, tqdm_for='matrix', pickle_key=None, overwrite=False):
     # try to load result
     if pickle_key is not None:
         pickle_key = (pickle_key[0], pickle_key[1].replace('svals', 'LRP'))
-        mats = load_data(*pickle_key)
-        if mats is not False: return mats
+        if not overwrite:
+            mats = load_data(*pickle_key)
+            if mats is not False: return mats
 
     itg, itp, itm = [lambda x: x]*3
     if tqdm_for=='matrix': itm = tqdm
