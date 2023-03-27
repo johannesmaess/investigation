@@ -355,7 +355,7 @@ def calc_vals(M, num_vals, return_vecs=False, svd_mode=True, abs_vals=False):
     # return sorted vals and vecs
     return (vals[order], np.array(vecs).T[order] if return_vecs else None)
 
-def calc_vals_batch(matrices=None, num_vals='auto', return_vecs=False, svd_mode=True, abs_vals=False, tqdm_for='point', pickle_key=None, overwrite=False, partition=False):
+def calc_vals_batch(matrices=None, num_vals='auto', return_vecs=False, svd_mode=True, abs_vals=False, tqdm_for='point', pickle_key=None, overwrite=False, partition=None):
     """
     Wraps around calc_evals to make calls for multiple weights, and multiple reference points.
     Mostly useful for determining an efficient number of vals to compute per matrix, putting the results into uniform arrays, and its checks.
@@ -419,7 +419,7 @@ def calc_vals_batch(matrices=None, num_vals='auto', return_vecs=False, svd_mode=
             and 0 <= partiton[1] < len(matrices[0]), \
             f"Invalid partition {partition}."
     else:
-        assert partition is None, "Pass integer or tuple as partition."
+        assert partition is None, f"Pass integer or tuple as partition. {partition}"
 
     n_weights, n_points, n_gammas = matrices.shape[:3]
     assert matrices[0, 0, 0].ndim == 2, "'matrices' should contain 2D arrays (np.ndarray or scipy.coo_array), nested in a 3D structure"

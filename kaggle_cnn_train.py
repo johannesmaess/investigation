@@ -14,7 +14,7 @@ def main():
     ### V5
     configs = []
     for seed in [0, 1]:
-        for depth in [4]: #[2,4,6,8]:
+        for depth in [2,6,8]: #[2,4,6,8]:
             for F in [9, 11]: #[3,5,7]:
                 configs.append({
                     'v': 5,

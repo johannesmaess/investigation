@@ -2,6 +2,7 @@ import numpy as np
 from util.naming import *
 from util.util_data_summary import prep_data, condition_number
 from util.util_pickle import load_data
+from util.common import match_gammas
 
 
 def mat_norm_batch(per_weight, p):

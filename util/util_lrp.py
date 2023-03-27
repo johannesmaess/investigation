@@ -5,7 +5,7 @@ from tqdm import tqdm
 import copy
 
 import util.util_tutorial as tut_utils
-from util.util_pickle import *
+from util.util_pickle import load_data, save_data
 
 import matplotlib.pyplot as plt
 
@@ -144,6 +144,7 @@ def compute_relevancies(mode, layers, A, output_rels='correct class', target=Non
                         if 'Gamma.' in mode:
                             rho = lambda p: p + curr_gamma*p.clamp(min=0)
                             helper_layer = tut_utils.newlayer(layers[l], rho)
+                            print('g', end="")
                         elif 'Gamma mat.' in mode:
                             helper_layer = copy.deepcopy(layers_conv_as_mat[l]) # todo: in the notebook I used a precomputation "layers_conv_as_mat"
                             helper_layer.set_gamma(curr_gamma)
@@ -163,7 +164,8 @@ def compute_relevancies(mode, layers, A, output_rels='correct class', target=Non
         else:
             R[l] = R[l+1]
 
-
+        print('\t', l, layers[l])
+        
         if return_only_l == l:
             return R[l]
 
@@ -196,6 +198,7 @@ def compute_relevancies(mode, layers, A, output_rels='correct class', target=Non
 
 # compute global LRP transition matrix
 def LRP_global_mat(model, point, gamma, l_lb = -1000, l_ub = 1000, delete_unactivated_subnetwork = 'mask', l_inp=0, l_out=-1, eps=1e-9):    
+    
     if point.ndim == 3: point = point.flatten()
     assert point.ndim == 1, f"Dont pass batch. 'point' should have 1 dim but shape is {point.shape}"
     if gamma=='inf': gamma=1e8
