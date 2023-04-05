@@ -6,35 +6,68 @@ from tqdm import tqdm
 
 from util.naming import PICKLE_PATH
 
-def save_data(model_tag, data_tag, data):
+def save_data(model_tag, data_tag, data, partition=None):
+    if partition is not None:
+        assert type(partition) is tuple, "Partition has to be a tuple ( weight, point )."
+        w,p = partition
+        data_tag += f"__partition_{w:03d}_{p:03d}"
+        
+        print("Saving:", model_tag, data_tag)
+    
     path = os.path.join(PICKLE_PATH, model_tag)
     if not os.path.exists(path): os.mkdir(path)
     path = os.path.join(path, f'{data_tag}.pickle')
     with open(path, 'wb') as handle:
         pickle.dump(data, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
-def load_data(model_tag, data_tag, partitioned=False):
+def load_data(model_tag, data_tag, partition=None, partitioned=False):
     if partitioned:
         path_regex = os.path.join(PICKLE_PATH, model_tag, f'{data_tag}__partition*')    
         matches = sorted(list(glob.glob(path_regex)))
         ws = sorted(list(set([m[:-11] for m in matches])))
         num_ps = len(set([m[-10:-7] for m in matches]))
+        
+        # if we are reading in Svals into one unified array, make sure to pad them with zeros to a unified length.
+        # if we are reading LRP matrices, num_vals will stay 0.
+        num_vals = 0
+        for m in matches:
+            with open(m, 'rb') as handle:
+                d = pickle.load(handle)
+                if d.ndim < 4: break
+                
+                num_vals = max(num_vals, d.shape[3])
+                del d
 
         res = []
-        for w in ws:
+        expected_shape = None
+        for w in ws[:]:
             print(w)
             matches_w = sorted(list(glob.glob(f'{w}*')))
-            assert len(matches_w) == num_ps, f"Not same number of points for all ws: {len(matches_w)} != {num_ps}. matches: {matches_w}"
-
+            assert len(matches_w) == num_ps, f"Not same number of points for all ws: {len(matches_w)} != {num_ps}. matches: {[(m[-14:-11], m[-10:-7]) for m in matches_w]}"
+            
             r = []
             for m in matches_w:
                 with open(m, 'rb') as handle:
-                    r.append(pickle.load(handle))
+                    d = pickle.load(handle)
+                    if num_vals != 0: 
+                        d = np.pad(d, [(0,0), (0,0), (0,0), (0, num_vals-d.shape[3])])
+                    if expected_shape is not None:
+                        assert expected_shape == d.shape, f"Last loaded shape is not equal to other shapes: {expected_shape}, {d.shape}"
+                    else: 
+                        expected_shape = d.shape
+                    r.append(d)
 
             r = np.concatenate(r, axis=1)
             res.append(r)
         
         return np.concatenate(res, axis=0)
+    
+    if partition is not None:
+        assert type(partition) is tuple, "Partition has to be a tuple ( weight, point )."
+        w,p = partition
+        data_tag += f"__partition_{w:03d}_{p:03d}"
+        
+        print("Loading:", model_tag, data_tag)
     
     path = os.path.join(PICKLE_PATH, model_tag, f'{data_tag}.pickle')
     if not os.path.exists(path):

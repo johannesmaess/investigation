@@ -9,6 +9,7 @@ from math import ceil, floor
 from util.naming import *
 from util.common import match_gammas
 from functools import partial
+from scipy import stats
 
 def percentile(n):
     def percentile_(x):
@@ -70,15 +71,15 @@ def plot_hists_on_ax(ax, vals_for_point, gammas, bins = [0, 1e-5, 1e-4, 1e-3, 1e
 def dice_to_selectors(dice):
     selectors = [slice(0, None)] * 4
     for i, slic in enumerate(dice): 
-        if   type(slic) == list:  selectors[i] = slic
-        elif type(slic) == int:   selectors[i] = slice(0, slic)
+        if   type(slic) in [list, np.ndarray]:  selectors[i] = slic
+        elif type(slic) == int:                 selectors[i] = slice(0, slic)
         elif type(slic) == tuple:
             if slic == (): continue # select everything
             selectors[i] = slice(*slic)
         else: assert False, f"Invalid dice: {dice}"
     return selectors
             
-def prep_data(vals, gammas=None, norm_g0=False, norm_s1=False, end_at_0=False, dice=()):
+def prep_data(vals, gammas=None, norm_g0=False, norm_s1=False, end_at_0=False, mean=None, hmean=None, dice=()):
     if type(vals) == tuple:   vals = load_data(*vals); assert vals is not False, "Could not load pickleid"
     else:                     vals = vals.copy()
     if gammas is None:        gammas = match_gammas(vals)
@@ -100,6 +101,26 @@ def prep_data(vals, gammas=None, norm_g0=False, norm_s1=False, end_at_0=False, d
         selectors = dice_to_selectors(dice)
         vals = vals[selectors[0], selectors[1], selectors[2], selectors[3]]
         gammas = gammas[selectors[2]]
+        
+    
+    assert (mean is None) or (hmean is None), "We can only calculate mean or hmean."
+
+    # calculate mean over...
+    if mean=='points': 
+        vals = stats.mean(vals, axis=1, keepdims=True, nan_policy='omit')
+    else:
+        assert mean is None, "Only hmean over points is supported so far."
+
+    # calculate harmonic mean over...
+    if hmean=='points': 
+        if end_at_0: 
+            vals[:, :, -1] = 1 # the entries for gamma=inf are end_at_0d to 0. The hmean can not be calculated for 0 entries.
+            vals = np.clip(vals, a_min=1e-3, a_max=None)
+        vals = stats.hmean(vals, axis=1, keepdims=True, nan_policy='omit')
+        if end_at_0: 
+            vals[:, :, -1] = 0 # We thus adopt the policy hmean(..., 0, ...) = 0.
+    else:
+        assert hmean is None, "Only hmean over points is supported so far."
 
     return vals, gammas
 
@@ -109,6 +130,7 @@ def distribution_plot(vals, gammas=None, dice=(),
                       norm_s1=False, 
                       # divide every (n-th singular) value by (the n-th singular value at gamma=0)
                       norm_g0=False,
+                      show=False,
                       **hist_kwargs):
     """
     Plots the distribution of Eigenvalues/Singularvalues 
@@ -160,20 +182,43 @@ def distribution_plot(vals, gammas=None, dice=(),
             if mode=='hist':       
                 plot_hists_on_ax(ax, vals_for_point, gammas, **hist_kwargs)
             elif mode in ['box', 'violin']:
-                if mode=='box':    ax.boxplot(vals_for_point.T)
-                if mode=='violin': ax.violinplot(vals_for_point.T)
-
-                ax.set_yscale('log')
-                ax.set_ylim(max(1e-9, cutoff/1.5), vals.max()*1.5)
+                if mode=='box':    
+                    ax.boxplot(vals_for_point.T)
+                    ax.set_xticks(np.arange(len(gammas)), [pretty_num(g) for g in gammas])
+                    
+                    ax.set_ylim(max(1e-9, cutoff/1.5), vals.max()*1.5)
+                    ax.axhline(1, color="green")
+                    
+                elif mode=='violin': 
+                    if False: # omit gamma=0
+                        mask = gammas > 0
+                        x = gammas[mask]
+                        y = vals_for_point[mask].T
+                        ax.set_xticks(np.log(x), [pretty_num(g) for g in x])
+                            
+                    else: # plot gamma=0 in the position of a small value
+                        x = gammas.copy()
+                        if x[0] == 0:
+                            x[0] = x[1] / 10
+                        y = vals_for_point.T
+                        ax.set_xticks(np.log(x), [pretty_num(g) for g in gammas])
+                            
+                        
+                        
+                    ax.violinplot(positions=np.log(x), dataset=y)
+                        
+                    
 
                 ax.set_xlabel("$\gamma$")
-                ax.set_xticks(1+np.arange(len(gammas)), gammas)
-
-                ax.axhline(1, color="green")
+                ax.set_yscale('log')
             else: raise Exception(f"Invalid mode: {mode}")
 
     plt.subplots_adjust(wspace=0.1, hspace=0.16) 
-    plt.show()
+    
+    if show:
+        plt.show()
+        
+    return fig, axs
 
 
 
@@ -327,7 +372,6 @@ def plot_sval_func(vals, gammas=None, dice=(),
     """
     Plot the gamma that maximises the fraction between the last to first singular value.
     """
-
     vals, gammas = prep_data(vals, gammas, dice=dice)
 
     # calculate which gamma yields the highest ratio sval_min / sval_max
@@ -358,7 +402,7 @@ def plot_sval_func(vals, gammas=None, dice=(),
         plt.ylabel("$\gamma$")
     else:
         fig, axs = plt.subplots(1, len(res), figsize=(5*len(res), 6))
-        for r, ax in zip(res, axs):
+        for r, ax in zip(res, axs if len(res)>1 else [axs]):
             ax.set_yscale('log')
             ax.set_xlabel("$\gamma$")
             ax.set_ylabel("$\\frac{\sigma_i(\gamma)}{\sigma_1(\gamma)}$")
@@ -374,6 +418,7 @@ def plot_sval_func(vals, gammas=None, dice=(),
                 ax.set_xlim((1e-3, 1e3))
 
     plt.show()
+    return res
     
 def condition_number_for_point(pvals, percentile=0):
     if type(percentile) in (int, float):
@@ -395,9 +440,15 @@ def condition_number(vals, percentile=0):
     vals, _ = prep_data(vals)
     return np.stack([np.stack([condition_number_for_point(pvals[:, np.any(pvals>0, axis=0)], percentile) for pvals in wvals]) for wvals in vals])
 
-def plot_condition_number(*args, percentile=0, **kwargs):
+def plot_condition_number(*args, percentile=0, minima=False, **kwargs):
     sval_func = partial(condition_number_for_point, percentile=percentile)
-    return plot_sval_func(*args, sval_func=sval_func, **kwargs)
+    
+    if minima != 2:
+        return plot_sval_func(*args, sval_func=sval_func, minima=minima, **kwargs)
+    
+    main = plot_sval_func(*args, sval_func=sval_func, minima=0, **kwargs)
+    mini = plot_sval_func(*args, sval_func=sval_func, minima=1, **kwargs)
+    return main, mini
 
 def plot_determinant(vals, gammas=None):
     """

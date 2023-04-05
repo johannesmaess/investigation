@@ -1,6 +1,5 @@
 import os, sys
 from util.naming import *
-from util.util_lrp import LRP_global_mat
 
 class HiddenPrints:
     def __enter__(self):
@@ -30,21 +29,21 @@ def match_gammas(vals):
     print("Provide gammas manually, if they are not any of {gammas3, gammas5, gammas_0_1_21_inf, gammas40}.")
     assert 0
     
+def parse_partition(n_weights, n_points, partition):
+    """
+    partition int should be zero indexed
+    output partition 2-tuple will be zero indexed
+    """
+    if type(partition) == int:
+        partition = (partition % n_weights, int(partition / n_weights))
     
+    if type(partition) is tuple:
+        assert len(partition) == 2 \
+            and 0 <= partition[0] < n_weights \
+            and 0 <= partition[1] < n_points, \
+            f"Invalid partition {partition}."
+    else:
+        assert partition is None, f"Pass integer or tuple as partition. {partition}"
+        
+    return partition
     
-### convenience functions for LRP matrix creation
-
-## d3 model
-def funcs_cascading__d3__m1_to_1(model): # m1 to 1
-    return [partial(LRP_global_mat, model=model, l_inp=1, l_out=-3, l_ub=l_ub, delete_unactivated_subnetwork=True) for l_ub in d3_after_conv_layer[:-1]]
-
-def funcs_inv_cascading__d3__m1_to_1(model): # m1 to 1
-    return [partial(LRP_global_mat, model=model, l_inp=1, l_out=-3, l_lb=l_ub-2, delete_unactivated_subnetwork=True) for l_ub in d3_after_conv_layer[:-1][::-1]]
-
-## s4 models
-def funcs_individual__s4(model):
-    return [partial(LRP_global_mat, model=model, l_inp=l_out-1, l_out=l_out, delete_unactivated_subnetwork=True) for l_out in s4_after_conv_layer]
-def funcs_cascading__s4__m1_to_1(model): # m1 to 1
-    return [partial(LRP_global_mat, model=model, l_inp=1, l_out=-3, l_ub=l_ub, delete_unactivated_subnetwork=True) for l_ub in s4_after_conv_layer]
-def funcs_inv_cascading__s4__m1_to_1(model): # m1 to 1
-    return [partial(LRP_global_mat, model=model, l_inp=1, l_out=-3, l_lb=l_ub-2, delete_unactivated_subnetwork=True) for l_ub in s4_after_conv_layer[::-1]]

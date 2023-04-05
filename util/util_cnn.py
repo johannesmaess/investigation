@@ -10,7 +10,7 @@ from sklearn.model_selection import train_test_split
 # import torch.nn.functional as F
 
 from util.naming import MNIST_CNN_PATH, device
-from util.util_pickle import load_shaps
+from util.util_pickle import load_shaps, load_data
 
 # ### DATASET ###
 
@@ -240,6 +240,10 @@ def data_loaders(shuffle = True, batch_size = 100, shapley_values_for=None, poin
     return train_loader, test_loader
 
 def first_mnist_batch(batch_size = 100, test=True):
+    if test is True and batch_size <= 1000 and ((d := load_data('mnist', 'first_batch_1000')) is not False):
+        data, target = d
+        return data[:batch_size], target[:batch_size]
+    
     loaders = data_loaders(shuffle = False, batch_size = batch_size)
     for data, target in loaders[int(test)]:
         return data, target

@@ -2,8 +2,8 @@
 #$ -q all.q
 #$ -cwd
 #$ -V
-#$ -t 1-240
-n_tasks = 240
+#$ -t 1-600
+n_tasks = 600
 
 ### Configure on local / Qsub system ###
 import os
@@ -16,11 +16,11 @@ if 'SGE_TASK_ID' in os.environ:
     assert 1 <= i_task <= n_tasks
 else:
     print("Running in non-parallel mode.")
-    i_task, n_tasks = 1, 1
+    i_task, n_tasks = 700,700
 
 ### Imports ###
 from util.util_gamma_rule import calc_vals_batch
-from util.util_lrp import LRP_global_mat, calc_mats_batch_functional
+from util.util_lrp import LRP_global_mat, calc_mats_batch_functional, funcs_cascading__s4__m1_to_1, funcs_inv_cascading__s4__m1_to_1, funcs_individual__s4
 from util.util_cnn import load_mnist_v4_models, first_mnist_batch
 # from util.util_data_summary import *
 from util.naming import *
@@ -28,72 +28,61 @@ from util.common import *
 
 ### Config ###
 
-data, target = first_mnist_batch()
+data, target = first_mnist_batch(1000)
 model_dict = load_mnist_v4_models()
 
-LRP =  0
+LRP =  1
 SVALS= 1
 
-if True:
-    num = int(i_task / 60) + 1
-    partition = i_task % 60
+n_weights, n_points = 3, 200
+
+n_partitions = n_weights * n_points
+num = int((i_task-1) / n_partitions) + 1
+partition = (i_task-1) % n_partitions
+
+
+# overwrite
+num = 5
+partition = i_task-1
 
 if num == 1:
     model=model_dict[s4f3_tag]
-    pickle_key =   ('s4f3', 'svals__individual_layer__gammas40')
+    model_key =     's4f3'
     
-    if LRP:
-        mat_funcs = funcs_individual__s4(model)
-        mask = np.any(model.forward(data).detach().numpy(), axis=1)
-        d = data[mask][:20]
-
 if num == 2:
     model=model_dict[s4f5_tag]
-    pickle_key =   ('s4f5', 'svals__individual_layer__gammas40')
-    
-    if LRP:
-        mat_funcs = funcs_individual__s4(model)
-        mask = np.any(model.forward(data).detach().numpy(), axis=1)
-        d = data[mask][:20]
+    model_key =     's4f5'
 
 if num == 3:
     model=model_dict[s4f7_tag]
-    pickle_key =   ('s4f7', 'svals__individual_layer__gammas40')
+    model_key =     's4f7'
     
-    if LRP:
-        mat_funcs = funcs_individual__s4(model)
-        mask = np.any(model.forward(data).detach().numpy(), axis=1)
-        d = data[mask][:20]
-
 if num == 4:
     model=model_dict[s4f9_tag]
-    pickle_key =   ('s4f9', 'svals__individual_layer__gammas40')
-    
-    if LRP:
-        mat_funcs = funcs_individual__s4(model)
-        mask = np.any(model.forward(data).detach().numpy(), axis=1)
-        d = data[mask][:20]
+    model_key =     's4f9'
         
-if num == -1:
+if num == 5:
     model=model_dict[s4f11_tag]
-    pickle_key =   ('s4f11', 'svals__individual_layer__gammas40')
+    model_key =     's4f11'
     
-    if LRP:
-        mat_funcs = funcs_individual__s4(model)
-        mask = np.any(model.forward(data).detach().numpy(), axis=1)
-        d = data[mask][:20]
-
-        
-
     
-print(pickle_key, len(mat_funcs), len(d), 'i_task', i_task, 'num', num, 'partition', partition)
+    
+pickle_key =   (model_key, 'svals__individual_layer__gammas40__L')
+
+print(pickle_key, 'i_task', i_task, 'num', num, 'partition', partition)
+
 
 if LRP:
+    mask = np.any(model.forward(data).detach().numpy(), axis=1)
+    d = data[mask][20:][:n_points]
+    
+    mat_funcs = funcs_individual__s4(model)
+    
     print("Computing mats...")
-    calc_mats_batch_functional(mat_funcs, gammas40, d, pickle_key=pickle_key, overwrite=True)
+    calc_mats_batch_functional(mat_funcs, gammas40, d, pickle_key=pickle_key, overwrite=False, tqdm_for='gamma', partition=partition)
     print("Done with mats.")
 
 if SVALS:
     print("Computing Svals...")
-    calc_vals_batch(pickle_key=pickle_key, overwrite=True, partition=partition)
+    calc_vals_batch(pickle_key=pickle_key, overwrite=False, tqdm_for='gamma', partition=partition, matrices_shape=(n_weights, n_points))
     print("Done with Svals.")

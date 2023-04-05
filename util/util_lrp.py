@@ -5,6 +5,7 @@ from tqdm import tqdm
 import copy
 
 import util.util_tutorial as tut_utils
+from util.common import *
 from util.util_pickle import load_data, save_data
 
 import matplotlib.pyplot as plt
@@ -144,7 +145,7 @@ def compute_relevancies(mode, layers, A, output_rels='correct class', target=Non
                         if 'Gamma.' in mode:
                             rho = lambda p: p + curr_gamma*p.clamp(min=0)
                             helper_layer = tut_utils.newlayer(layers[l], rho)
-                            print('g', end="")
+                            # print('g', end="")
                         elif 'Gamma mat.' in mode:
                             helper_layer = copy.deepcopy(layers_conv_as_mat[l]) # todo: in the notebook I used a precomputation "layers_conv_as_mat"
                             helper_layer.set_gamma(curr_gamma)
@@ -164,7 +165,7 @@ def compute_relevancies(mode, layers, A, output_rels='correct class', target=Non
         else:
             R[l] = R[l+1]
 
-        print('\t', l, layers[l])
+        # print('\t', l, layers[l])
         
         if return_only_l == l:
             return R[l]
@@ -238,24 +239,59 @@ def LRP_global_mat(model, point, gamma, l_lb = -1000, l_ub = 1000, delete_unacti
 
     return coo_array(LRP_backward.detach().numpy())
 
-def calc_mats_batch_functional(mat_funcs, gammas, points, tqdm_for='matrix', pickle_key=None, overwrite=False):
-    # try to load result
-    if pickle_key is not None:
-        pickle_key = (pickle_key[0], pickle_key[1].replace('svals', 'LRP'))
-        if not overwrite:
-            mats = load_data(*pickle_key)
-            if mats is not False: return mats
 
+def calc_mats_batch_functional(mat_funcs, gammas, points, tqdm_for='matrix', pickle_key=None, overwrite=False, partition=None):
+    
     itg, itp, itm = [lambda x: x]*3
     if tqdm_for=='matrix': itm = tqdm
     if tqdm_for=='point':  itp = tqdm
     if tqdm_for=='gamma':  itg = tqdm
+    
+    partition = parse_partition(len(mat_funcs), len(points), partition)
+    
+    if pickle_key is not None:
+        pickle_key = (pickle_key[0], pickle_key[1].replace('svals', 'LRP'))
+        
+        if not overwrite:
+            mats = load_data(*pickle_key)
+            if mats is not False: 
+                print("Found unpartitioned, full result. Returning.")
+                return mats
+            
+            mats = load_data(*pickle_key, partition=partition)
+            if mats is not False: 
+                print("Found unpartitioned, full result. Returning.")
+                return mats
+    
+    if partition: 
+        mat_funcs = [ mat_funcs[partition[0]] ]
+        points =       [ points[partition[1]] ]
 
     mats = np.array([[[mat_func(point=point, gamma=gamma) for gamma in itg(gammas)] for point in itp(points)] for mat_func in itm(mat_funcs)])
 
     # save result
     if pickle_key is not None:
         print("Matrices vals under key:", pickle_key)
-        save_data(*pickle_key, mats)
+        save_data(*pickle_key, mats, partition=partition)
 
     return mats
+
+
+
+    
+### convenience functions for LRP matrix creation
+
+## d3 model
+def funcs_cascading__d3__m1_to_1(model): # m1 to 1
+    return [partial(LRP_global_mat, model=model, l_inp=1, l_out=-3, l_ub=l_ub, delete_unactivated_subnetwork=True) for l_ub in d3_after_conv_layer[:-1]]
+
+def funcs_inv_cascading__d3__m1_to_1(model): # m1 to 1
+    return [partial(LRP_global_mat, model=model, l_inp=1, l_out=-3, l_lb=l_ub-2, delete_unactivated_subnetwork=True) for l_ub in d3_after_conv_layer[:-1][::-1]]
+
+## s4 models
+def funcs_individual__s4(model):
+    return [partial(LRP_global_mat, model=model, l_inp=l_out-1, l_out=l_out, delete_unactivated_subnetwork=True) for l_out in s4_after_conv_layer]
+def funcs_cascading__s4__m1_to_1(model): # m1 to 1
+    return [partial(LRP_global_mat, model=model, l_inp=1, l_out=-3, l_ub=l_ub, delete_unactivated_subnetwork=True) for l_ub in s4_after_conv_layer]
+def funcs_inv_cascading__s4__m1_to_1(model): # m1 to 1
+    return [partial(LRP_global_mat, model=model, l_inp=1, l_out=-3, l_lb=l_ub-2, delete_unactivated_subnetwork=True) for l_ub in s4_after_conv_layer[::-1]]

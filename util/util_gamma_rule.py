@@ -5,13 +5,11 @@ import numpy as np
 from numpy.linalg import eig, svd
 
 from util.util_data_summary import pretty_num, prep_data, dice_to_selectors
-from util.common import HiddenPrints
+from util.common import HiddenPrints, parse_partition
 from util.naming import *
 from util.util_pickle import load_data, save_data
 
 import torch
-
-from scipy import stats
 from scipy.sparse import coo_array
 
 import matplotlib as mpl
@@ -355,7 +353,7 @@ def calc_vals(M, num_vals, return_vecs=False, svd_mode=True, abs_vals=False):
     # return sorted vals and vecs
     return (vals[order], np.array(vecs).T[order] if return_vecs else None)
 
-def calc_vals_batch(matrices=None, num_vals='auto', return_vecs=False, svd_mode=True, abs_vals=False, tqdm_for='point', pickle_key=None, overwrite=False, partition=None):
+def calc_vals_batch(matrices=None, num_vals='auto', return_vecs=False, svd_mode=True, abs_vals=False, tqdm_for='point', pickle_key=None, overwrite=False, partition=None, matrices_shape=None):
     """
     Wraps around calc_evals to make calls for multiple weights, and multiple reference points.
     Mostly useful for determining an efficient number of vals to compute per matrix, putting the results into uniform arrays, and its checks.
@@ -387,40 +385,43 @@ def calc_vals_batch(matrices=None, num_vals='auto', return_vecs=False, svd_mode=
         else:
             assert 0, f"Invalid num_vals {num_vals}"
 
-        # mark which partition
-        if partition:
-            w,p = partition
-            dkey += f"__partition_{w:03d}_{p:03d}"
-
         # try loading the data
         if not overwrite:
             vals = load_data(mkey, dkey)
             if vals is not False:
                 if matrices is not None: assert vals.shape[:3] == matrices.shape[:3], "Found svals in storage, but they do not match the passed matrices."
+                if partition is not None: print("Found unpartitioned, full result. Returning.")
                 return vals
 
         # if matrices are not passed, try to load them
         if matrices is None:
             matrices = load_data(mkey, dkey_lrp)
-            assert matrices is not False, "matrices are not passed, and can not be loaded from storage."
+            if matrices is False: 
+                assert  partition is not False, "matrices are not passed, and can not be loaded from storage."
+            else:
+                marices_shape = len(matrices), len(matrices[0])
+            
 
         # for saving the svals
-        save_func = lambda x: save_data(mkey, dkey, x)
+        def save_func(x): 
+            print("Saving vals under key:", (mkey, dkey))
+            save_data(mkey, dkey, x, partition=partition)
     else:
         save_func = lambda x: 0
         assert matrices is not None, "Neither the matrices, nor a key for loading them from storage is passed."
         
-    if type(partition) is int:
-        n = len(matrices)
-        partiton = int(partition / n), partition % n
-    if type(partition) is tuple:
-        assert len(partition) == 2 \
-            and 0 <= partiton[0] < len(matrices) \
-            and 0 <= partiton[1] < len(matrices[0]), \
-            f"Invalid partition {partition}."
-    else:
-        assert partition is None, f"Pass integer or tuple as partition. {partition}"
-
+    if partition is not None:
+        partition = parse_partition(*matrices_shape, partition)
+        w, p = partition
+        if matrices not in [False, None]:
+            matrices = matrices[w:w+1, p:p+1]
+        else:
+            matrices = load_data(mkey, dkey_lrp, partition=partition)
+        
+    
+    assert matrices is not False, "matrices are not passed, and can not be loaded from storage."
+            
+    print('type(matrices):', type(matrices))
     n_weights, n_points, n_gammas = matrices.shape[:3]
     assert matrices[0, 0, 0].ndim == 2, "'matrices' should contain 2D arrays (np.ndarray or scipy.coo_array), nested in a 3D structure"
 
@@ -455,21 +456,14 @@ def calc_vals_batch(matrices=None, num_vals='auto', return_vecs=False, svd_mode=
 
     # calculate decomposition
     try:
-        if partition:
-            matrices_per_point = matrices[w,p]
-            for k, matrix_per_gamma in itg(enumerate(matrices_per_point)):
-                    evals, evecs = calc_vals(matrix_per_gamma, num_vals=vals_per_matrix[w,p], return_vecs=return_vecs)
-                    computed_evals[0, 0, k, :len(evals)] = evals
-                    if return_vecs: computed_evecs[0, 0, k, :len(evecs)] = evecs
-        else:         
-            for i, matrices_per_weight in itm(enumerate(matrices)):
-                for j, matrices_per_point in itp(enumerate(matrices_per_weight)):
-                    for k, matrix_per_gamma in itg(enumerate(matrices_per_point)):
-                        evals, evecs = calc_vals(matrix_per_gamma, num_vals=vals_per_matrix[i,j], return_vecs=return_vecs)
-                        computed_evals[i, j, k, :len(evals)] = evals
-                        if return_vecs: computed_evecs[i, j, k, :len(evecs)] = evecs
+        for i, matrices_per_weight in itm(enumerate(matrices)):
+            for j, matrices_per_point in itp(enumerate(matrices_per_weight)):
+                for k, matrix_per_gamma in itg(enumerate(matrices_per_point)):
+                    evals, evecs = calc_vals(matrix_per_gamma, num_vals=vals_per_matrix[i,j], return_vecs=return_vecs)
+                    computed_evals[i, j, k, :len(evals)] = evals
+                    if return_vecs: computed_evecs[i, j, k, :len(evecs)] = evecs
 
-                    save_func(computed_evals)
+                save_func(computed_evals)
 
     except KeyboardInterrupt:
         print("Received Interrupt. Stop computation, return incomplete result.")
@@ -481,7 +475,6 @@ def calc_vals_batch(matrices=None, num_vals='auto', return_vecs=False, svd_mode=
         if return_vecs and not np.any(np.imag(computed_evecs)):
             computed_evecs = np.real(computed_evecs)
 
-    print("Saving vals under key:", (mkey, dkey))
     save_func(computed_evals)
 
     if return_vecs: 
@@ -529,7 +522,7 @@ def plot_vals_lineplot(vals, gammas=None,
                 ylabel="Singular values", title=None,
                 ylim=4, xlim=None,
                 yscale='linear', xscale='linear', sharey=False, xtick_mask=None,
-                figsize=None, show=True, 
+                figsize=None, show=False, 
                 green_line_at_x=None, tag_line=None, 
                 colormap='viridis',
                 # give location of legend
@@ -544,6 +537,9 @@ def plot_vals_lineplot(vals, gammas=None,
                 spectra=False, 
                 # dice: restrict which weights, points, gammas, and svals get plotted.
                 dice=(),
+                       
+                # compute means to simplify plot
+                mean=None, hmean=None,
                 
                 # put the matrices c value as text in the top right corner
                 annotate_c=None, # pass c values in same form as data
@@ -558,7 +554,9 @@ def plot_vals_lineplot(vals, gammas=None,
     else:
         xlabel = '$\gamma$'
 
-    vals, gammas = prep_data(vals, gammas, norm_g0=norm_g0, norm_s1=norm_s1, end_at_0=end_at_0, dice=dice)
+    vals, gammas = prep_data(vals, gammas, norm_g0=norm_g0, norm_s1=norm_s1, end_at_0=end_at_0, \
+                             mean=mean, hmean=hmean, \
+                             dice=dice)
     selectors = dice_to_selectors(dice)
     if end_at_0 and yscale=='log': vals += 1e-5
 
@@ -585,7 +583,7 @@ def plot_vals_lineplot(vals, gammas=None,
         xlim = None
     
     if spectra: pass
-    elif xlim:
+    elif xlim and 0:
         mask = np.logical_and(gammas >= xlim[0], gammas <= xlim[1])
         gammas = gammas[mask]
         vals = vals[:, :, mask]
@@ -758,8 +756,8 @@ def plot_vals_lineplot(vals, gammas=None,
     plt.subplots_adjust(hspace=0.3)
     if show:
         plt.show()
-    else:
-        return fig, axs
+        
+    return fig, axs
 
 
 def plot_multiplicative_change(vals, gammas=None, hmean=False, end_at_0=False, **passed_kwargs):
@@ -774,18 +772,9 @@ def plot_multiplicative_change(vals, gammas=None, hmean=False, end_at_0=False, *
     for k,v in passed_kwargs.items(): kwargs[k] = v
         
     with HiddenPrints():
-        change, gammas = prep_data(vals, gammas, end_at_0=end_at_0, norm_g0=True)
+        change, gammas = prep_data(vals, gammas, end_at_0=end_at_0, norm_g0=True, hmean=hmean)
     
     if end_at_0 and kwargs['yscale']=='log': change += 0.01
-    
-    # calculate harmonic mean over...
-    if hmean=='points': 
-        if end_at_0: 
-            change[:, :, -1] = 1 # the entries for gamma=inf are end_at_0d to 0. The hmean can not be calculated for 0 entries.
-            change = np.clip(change, a_min=1e-3, a_max=None)
-        change = stats.hmean(change, axis=1, keepdims=True, nan_policy='omit')
-        if end_at_0: 
-            change[:, :, -1] = 0 # We thus adopt the policy hmean(..., 0, ...) = 0.
     
     return plot_vals_lineplot(change, gammas, **kwargs)
 
