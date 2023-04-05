@@ -131,6 +131,7 @@ def distribution_plot(vals, gammas=None, dice=(),
                       # divide every (n-th singular) value by (the n-th singular value at gamma=0)
                       norm_g0=False,
                       show=False,
+                      sharey=None,
                       **hist_kwargs):
     """
     Plots the distribution of Eigenvalues/Singularvalues 
@@ -148,24 +149,24 @@ def distribution_plot(vals, gammas=None, dice=(),
     # if norm_g0:  ylabel='$\\frac{ \sigma_i(\gamma) }{ \sigma_i(0) }$'
 
     lbl_point=None
-    sharey='row'
+    sharey_auto='row'
     if aggregate_over=='points' or agg:
         n_trans, n_point, n_gamma, n_vals = vals.shape
         vals = vals.transpose((0, 2, 3, 1)).reshape((n_trans, 1, n_gamma, n_point * n_vals))
         lbl_point=f"[{0}, {n_point-1}]"
-        sharey=False
+        sharey_auto=False
 
     n_trans, n_point, n_gamma, _ = vals.shape
 
     # order plots horizontally. and additionally vertically, if multiple LRP-transformation & reference points  are to be passed.
     if n_point==1:
         n_ax = (1, n_trans) 
-        sharey = False
+        sharey_auto = False
     else:
         n_ax = (n_trans, n_point)
     figsize = [10*n_ax[1], 4*n_ax[0] * (0.9*n_gamma)**(mode=='hist')]
 
-    fig, axs = plt.subplots(*n_ax, figsize=figsize, sharey=sharey)
+    fig, axs = plt.subplots(*n_ax, figsize=figsize, sharey=(sharey or sharey_auto))
     axs = np.array(axs).reshape((n_trans, n_point)) # for correct loop iteration
 
     hist_kwargs['max_val'] = vals.max() * 20
