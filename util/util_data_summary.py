@@ -132,6 +132,9 @@ def distribution_plot(vals, gammas=None, dice=(),
                       norm_g0=False,
                       show=False,
                       sharey=None,
+                      uniform_spacing=False, # if True, don't consider the gamma values to position boxes/violins
+                      showextrema=True, showmedians=True, # violin plot args
+                      axs=None, # provide (the right amount of) axs to draw on
                       **hist_kwargs):
     """
     Plots the distribution of Eigenvalues/Singularvalues 
@@ -166,7 +169,8 @@ def distribution_plot(vals, gammas=None, dice=(),
         n_ax = (n_trans, n_point)
     figsize = [10*n_ax[1], 4*n_ax[0] * (0.9*n_gamma)**(mode=='hist')]
 
-    fig, axs = plt.subplots(*n_ax, figsize=figsize, sharey=(sharey or sharey_auto))
+    if axs is not None: fig = None
+    else: fig, axs = plt.subplots(*n_ax, figsize=figsize, sharey=(sharey or sharey_auto))
     axs = np.array(axs).reshape((n_trans, n_point)) # for correct loop iteration
 
     hist_kwargs['max_val'] = vals.max() * 20
@@ -183,14 +187,14 @@ def distribution_plot(vals, gammas=None, dice=(),
             if mode=='hist':       
                 plot_hists_on_ax(ax, vals_for_point, gammas, **hist_kwargs)
             elif mode in ['box', 'violin']:
-                if mode=='box':    
+                if mode=='box' and uniform_spacing==True:    
                     ax.boxplot(vals_for_point.T)
                     ax.set_xticks(np.arange(len(gammas)), [pretty_num(g) for g in gammas])
                     
                     ax.set_ylim(max(1e-9, cutoff/1.5), vals.max()*1.5)
                     ax.axhline(1, color="green")
                     
-                elif mode=='violin': 
+                else: # uniform_spacing==False or mode=='violin' 
                     if False: # omit gamma=0
                         mask = gammas > 0
                         x = gammas[mask]
@@ -205,8 +209,9 @@ def distribution_plot(vals, gammas=None, dice=(),
                         ax.set_xticks(np.log(x), [pretty_num(g) for g in gammas])
                             
                         
-                        
-                    ax.violinplot(positions=np.log(x), dataset=y)
+                    if mode=='violin': ax.violinplot(positions=np.log(x), dataset=y, \
+                                                     showextrema=showextrema, showmedians=showmedians)
+                    elif mode=='box':     ax.boxplot(positions=np.log(x),       x=y, showfliers= showextrema)
                         
                     
 
