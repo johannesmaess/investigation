@@ -696,7 +696,8 @@ def plot_vals_lineplot(vals, gammas=None,
                 indices = np.unique(indices)
                 # print(f"Reducing num of lines from: {Y.shape[1]} to {len(indices)}")
                 Y = Y[:, indices]
-
+            else:
+                indices = np.arange(Y.shape[1])
             
             if colormap is not None:
                 # count number of lines that have non-zero, non-nan elements in them
@@ -709,8 +710,8 @@ def plot_vals_lineplot(vals, gammas=None,
 
             else:
                 # labels for legend
-                labels = [f'Exp. {i+1}, Point {j+1}, Sval {k+1}' for k in range(Y.shape[1])]
-                labels = [f'Singular value {k+1}' for k in range(Y.shape[1])] # <- prettier, for Proposal plot
+                labels = [f'Exp. {i+1}, Point {j+1}, Sval {k+1}' for k in indices]
+                labels = [f'Singular value {k+1}' for k in indices] # <- prettier, for Proposal plot
                 if tag_line is not None:
                     tags = np.array(tag_line)[selectors[3]]
                     assert len(tags) == len(labels), "Invalid labels per line passed."
