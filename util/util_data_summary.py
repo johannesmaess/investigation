@@ -2,6 +2,7 @@ import numpy as np
 import torch
 import matplotlib.pyplot as plt
 import seaborn as sns
+import matplotlib as mpl
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from tqdm import tqdm
 from util.util_pickle import load_data
@@ -381,10 +382,11 @@ def plot_sval_func(vals, gammas=None, dice=(),
     vals, gammas = prep_data(vals, gammas, dice=dice)
 
     # calculate which gamma yields the highest ratio sval_min / sval_max
-    res=[]
+    res, minis = [], []
 
     for wvals in vals[:]:                               # wwavls contain: per weight, per point, per gamma, n singular values
         res.append([])
+        minis.append([])
         for pvals in wvals:                             # pvals contain:              per point, per gamma, n singular values
             # filter for non-zero singular values
             # print("vals", pvals.shape, end=" -> ")
@@ -395,7 +397,10 @@ def plot_sval_func(vals, gammas=None, dice=(),
             if minima==True:
                 gamma_idx = func_vals.argmin()
                 g = gammas[gamma_idx]
-                res[-1].append(1e8 if g=='inf' else g)
+                if g=='inf': g = 1e8
+                res[-1].append(g)
+
+                minis[-1].append(func_vals.min())
             else:
                 res[-1].append(func_vals)
 
@@ -406,24 +411,27 @@ def plot_sval_func(vals, gammas=None, dice=(),
         plt.ylim((-.5,5))
         plt.xlabel("Matrix No.")
         plt.ylabel("$\gamma$")
-    else:
-        fig, axs = plt.subplots(1, len(res), figsize=(5*len(res), 6))
-        for r, ax in zip(res, axs if len(res)>1 else [axs]):
-            ax.set_yscale('log')
-            ax.set_xlabel("$\gamma$")
-            ax.set_ylabel("$\\frac{\sigma_i(\gamma)}{\sigma_1(\gamma)}$")
 
-            if np.any([g=='inf' for g in gammas]):
-                print(gammas)
-                ax.plot(r.T)
-                ax.set_xticks(np.arange(len(gammas)))
-                ax.set_xticklabels(gammas)
-            else:
-                ax.plot(gammas, r.T)
-                ax.set_xscale('log')
-                ax.set_xlim((1e-3, 1e3))
+        return res, minis
 
-    plt.show()
+    fig, axs = plt.subplots(1, len(res), figsize=(5*len(res), 6), sharex=True, sharey=True)
+    for r, ax in zip(res, axs if len(res)>1 else [axs]):
+        ax.set_yscale('log')
+        ax.set_xlabel("$\gamma$")
+        ax.set_ylabel("$\\frac{\sigma_i(\gamma)}{\sigma_1(\gamma)}$")
+
+        ax.set_prop_cycle(color=[mpl.colormaps['tab20'](k) for k in np.linspace(0, 1, len(r))])
+
+        if np.any([g=='inf' for g in gammas]):
+            print(gammas)
+            ax.plot(r.T)
+            ax.set_xticks(np.arange(len(gammas)))
+            ax.set_xticklabels(gammas)
+        else:
+            ax.plot(gammas, r.T, alpha=.75)
+            ax.set_xscale('log')
+
+    ax.set_prop_cycle(None)  
     return res
     
 def condition_number_for_point(pvals, percentile=0):
@@ -446,15 +454,67 @@ def condition_number(vals, percentile=0):
     vals, _ = prep_data(vals)
     return np.stack([np.stack([condition_number_for_point(pvals[:, np.any(pvals>0, axis=0)], percentile) for pvals in wvals]) for wvals in vals])
 
-def plot_condition_number(*args, percentile=0, minima=False, **kwargs):
+def plot_condition_number(*args, 
+                          percentile=0, mode='combined', 
+                          ticks=None, xlim=(1e-4, 1e3), ylim=(1, 1e5), 
+                          **kwargs):
     sval_func = partial(condition_number_for_point, percentile=percentile)
     
-    if minima != 2:
-        return plot_sval_func(*args, sval_func=sval_func, minima=minima, **kwargs)
+    if mode=='lines':
+        return plot_sval_func(*args, sval_func=sval_func, minima=0, **kwargs)
+    if mode=='minima':
+        return plot_sval_func(*args, sval_func=sval_func, minima=1, **kwargs)
+    if mode=='both':
+        main = plot_sval_func(*args, sval_func=sval_func, minima=0, **kwargs)
+        plt.show()
+        mini = plot_sval_func(*args, sval_func=sval_func, minima=1, **kwargs)
+        return main, mini
     
-    main = plot_sval_func(*args, sval_func=sval_func, minima=0, **kwargs)
-    mini = plot_sval_func(*args, sval_func=sval_func, minima=1, **kwargs)
-    return main, mini
+    if mode=='combined':
+        gs, minis = plot_sval_func(*args, sval_func=sval_func, minima=1, **kwargs)
+        plt.clf() # clear
+
+        plot_sval_func(*args, sval_func=sval_func, minima=0, **kwargs)
+        fig = plt.gcf()
+        axs = fig.axes
+
+        for g, mini, ax in zip(gs, minis, axs):
+            colors = [mpl.colormaps['tab20'](k) for k in np.linspace(0, 1, len(mini))]
+            ax.scatter(x=g, y=mini, marker='X', s=80, zorder=2, color=colors)
+            # ax.violinplot(vert=False, dataset=g, showextrema=False, showmedians=False, widths=1)
+            # ax.boxplot(vert=False, x=g, showfliers=False, showcaps=False)
+
+            height = 0.3
+            ax_histx = ax.inset_axes([0, -height, 1, height])
+
+            if ticks is None: ticks=ax.get_xticks()
+            ax.set_xticks([])
+            ax_histx.set_xticks(np.log10(ticks))
+            ax_histx.set_xticklabels(ticks)
+
+            ax_histx.set_yticks([])
+            ax.set_xlabel('')
+            ax.set_ylabel('')
+            ax_histx.set_xlabel('$\gamma$')
+            
+            ax.set_ylim(ylim)
+            ax.set_xlim(xlim)
+            ax_histx.set_xlim(np.log10(xlim))
+            sns.kdeplot(x=np.log10(g), bw_method=.6, ax=ax_histx, fill=True)
+
+        fig.set_tight_layout(True)
+        fig.set_figheight(6)
+
+        if type(percentile) in (int, float): u_percentile = 1 - percentile
+        else:                                u_percentile = 1 - percentile[1]
+
+        lbl = '$\kappa_{' + str(u_percentile) + '}(\gamma)$'
+        lbl = '$\kappa_q(\gamma)$'
+        axs[0].set_ylabel(lbl, rotation=0, fontsize=20, horizontalalignment='right')
+
+        return fig, axs
+
+    
 
 def plot_determinant(vals, gammas=None):
     """
