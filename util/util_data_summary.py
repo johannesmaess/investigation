@@ -509,7 +509,7 @@ def plot_condition_number(*args,
         else:                                u_percentile = 1 - percentile[1]
 
         lbl = '$\kappa_{' + str(u_percentile) + '}(\gamma)$'
-        lbl = '$\kappa_q(\gamma)$'
+        lbl = '$\kappa_q$'
         axs[0].set_ylabel(lbl, rotation=0, fontsize=20, horizontalalignment='right')
 
         return fig, axs

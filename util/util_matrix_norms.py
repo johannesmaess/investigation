@@ -1,7 +1,7 @@
 import numpy as np
 from util.naming import *
 from util.util_data_summary import prep_data, condition_number
-from util.util_pickle import load_data
+from util.util_pickle import load_data, save_data
 from util.common import match_gammas
 
 
@@ -34,12 +34,25 @@ def nonzero_rows_cols_batch(per_weight):
     def uni(arr): return len(np.unique(arr))
     return np.array([[[[uni(mat.row), uni(mat.col)] for mat in per_gamma] for per_gamma in per_point] for per_point in per_weight]).transpose((3,0,1,2))
 
-def calc_norm_dict(matrices=None, svals=None, gammas=None, pickle_key=(), cs=None, filter_size=None):
+def calc_norm_dict(matrices=None, svals=None, gammas=None, pickle_key=(), cs=None, filter_size=None, version='V1', overwrite=False):
     """
     Returns a collection of useful norms, and bounds on the L2 norm in a dictionary.
     """
-    if svals == None: svals, gammas = prep_data(pickle_key, gammas)
-    if matrices == None:
+    ## try to load the result
+    if pickle_key:
+        mkey, dkey = pickle_key
+        ind = dkey.find('__')
+        # key for loading norms
+        dkey_norms = 'norm_dict_' + version + dkey[ind:]
+
+        if not overwrite:
+            res = load_data(mkey, dkey_norms)
+            if res is not False: return res
+
+    ## compute the norms
+    # load svals and matrices
+    if svals is None: svals, gammas = prep_data(pickle_key, gammas)
+    if matrices is None:
         mkey, dkey = pickle_key
         ind = dkey.find('__')
         # key for loading LRP matrices: "LRP__..."
@@ -127,5 +140,9 @@ def calc_norm_dict(matrices=None, svals=None, gammas=None, pickle_key=(), cs=Non
         if cs is not None:
             norm_dict["Linf by L1 analytically"] = filter_size * l1_analytically
             norm_dict["sqrt_L1_Linf by L1 analytically"] = np.sqrt(filter_size) * l1_analytically
+
+
+    if pickle_key:
+        save_data(mkey, dkey_norms, norm_dict)
 
     return norm_dict
