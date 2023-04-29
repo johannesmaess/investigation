@@ -26,6 +26,15 @@ def load_data(model_tag, data_tag, partition=None, partitioned=False):
         matches = sorted(list(glob.glob(path_regex)))
         ws = sorted(list(set([m[:-11] for m in matches])))
         num_ps = len(set([m[-10:-7] for m in matches]))
+
+        if len(ws) == 1 and ws[0][-3:] == '000': # we are loading Pixel Flipping scores
+            res = {}
+            for m in matches:
+                with open(m, 'rb') as handle:
+                    d = pickle.load(handle)
+                    assert type(d) is dict, "Expected pix flip scores in dictionary form!"
+                    res.update(d)
+            return res
         
         # if we are reading in Svals into one unified array, make sure to pad them with zeros to a unified length.
         # if we are reading LRP matrices, num_vals will stay 0.
