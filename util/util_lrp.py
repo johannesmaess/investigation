@@ -141,11 +141,11 @@ def compute_relevancies(mode, layers, A, output_rels='correct class', target=Non
                     l_lb = float(mode.split("l>")[1].split(" ")[0]) if "l>" in mode else -1000
                     if l_lb < l < l_ub:
                         curr_gamma = float(gam) if 'inf' != (gam := mode.split("gamma=")[1].split(" ")[0]) else 1e8
-                        # print(l, curr_gamma)
+                        if 'print' in mode: print('g', end="")
+                        
                         if 'Gamma.' in mode:
                             rho = lambda p: p + curr_gamma*p.clamp(min=0)
                             helper_layer = tut_utils.newlayer(layers[l], rho)
-                            # print('g', end="")
                         elif 'Gamma mat.' in mode:
                             helper_layer = copy.deepcopy(layers_conv_as_mat[l]) # todo: in the notebook I used a precomputation "layers_conv_as_mat"
                             helper_layer.set_gamma(curr_gamma)
@@ -165,7 +165,7 @@ def compute_relevancies(mode, layers, A, output_rels='correct class', target=Non
         else:
             R[l] = R[l+1]
 
-        # print('\t', l, layers[l])
+        if 'print' in mode: print('\t', l, layers[l])
         
         if return_only_l == l:
             return R[l]

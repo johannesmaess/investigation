@@ -49,8 +49,9 @@ def parse_partition(n_weights, n_points, partition):
     
 LARGE_FS = 24
 SMALL_FS = 15
+TINY_FS = 12
 
-def annotate_common(axs, n_expected=None, xlabel='$\gamma$', ylabel=None):
+def annotate_common(axs, n_expected=None, xlabel='$\gamma$', ylabel=None, yvertical=True):
     axs = np.array(axs).flatten()
     if n_expected is not None: assert len(axs) == n_expected
     
@@ -60,32 +61,54 @@ def annotate_common(axs, n_expected=None, xlabel='$\gamma$', ylabel=None):
             ax.set_xlabel(xlabel, fontsize=SMALL_FS)
 
     if ylabel is not None:
-        axs[0].set_ylabel(ylabel, fontsize=SMALL_FS)
+        if yvertical:
+            axs[0].set_ylabel(ylabel, fontsize=SMALL_FS)
+        else:
+            axs[0].set_ylabel(ylabel, fontsize=SMALL_FS, rotation=0, ha='right')
 
     return axs
 
 def annotate_axs_d3_cascading(axs, **kwargs):
     axs = annotate_common(axs, n_expected=6, **kwargs)
 
-    axs[0].set_title("$R^{(1 \\leftarrow T)}_{\cdot | \cdot}$", loc='left', fontsize=LARGE_FS)
-    axs[1].set_title("$R^{(1 \\leftarrow T)}_{\cdot | \cdot}$", loc='left', fontsize=LARGE_FS)
-    axs[2].set_title("$R^{(1 \\leftarrow T)}_{\cdot | \cdot}$", loc='left', fontsize=LARGE_FS)
-    axs[3].set_title("$R^{(1 \\leftarrow T)}_{\cdot | \cdot}$", loc='left', fontsize=LARGE_FS)
-    axs[4].set_title("$R^{(1 \\leftarrow T)}_{\cdot | \cdot}$", loc='left', fontsize=LARGE_FS)
-    axs[5].set_title("$R^{(1 \\leftarrow T)}_{\cdot | \cdot}$", loc='left', fontsize=LARGE_FS)
+    axs[0].set_title("$R^{(1 \\leftarrow T)}_{\cdot | \cdot}$", loc='left', fontsize=TINY_FS)
+    axs[1].set_title("$R^{(1 \\leftarrow T)}_{\cdot | \cdot}$", loc='left', fontsize=TINY_FS)
+    axs[2].set_title("$R^{(1 \\leftarrow T)}_{\cdot | \cdot}$", loc='left', fontsize=TINY_FS)
+    axs[3].set_title("$R^{(1 \\leftarrow T)}_{\cdot | \cdot}$", loc='left', fontsize=TINY_FS)
+    axs[4].set_title("$R^{(1 \\leftarrow T)}_{\cdot | \cdot}$", loc='left', fontsize=TINY_FS)
+    axs[5].set_title("$R^{(1 \\leftarrow T)}_{\cdot | \cdot}$", loc='left', fontsize=TINY_FS)
 
-    axs[0].set_title("$\gamma^{(1)} = \gamma$\n$\gamma_{(2-6)} = 0$",     loc='right', fontsize=SMALL_FS)
-    axs[1].set_title("$\gamma^{(1,2)} = \gamma$\n$\gamma_{(3-6)} = 0$", loc='right', fontsize=SMALL_FS)
-    axs[2].set_title("$\gamma^{(1-3)} = \gamma$\n$\gamma_{(4-6)} = 0$", loc='right', fontsize=SMALL_FS)
-    axs[3].set_title("$\gamma^{(1-4)} = \gamma$\n$\gamma_{(5,6)} = 0$", loc='right', fontsize=SMALL_FS)
-    axs[4].set_title("$\gamma^{(1-5)} = \gamma$\n$\gamma_{(6)} = 0$",   loc='right', fontsize=SMALL_FS)
-    axs[5].set_title("$\gamma^{(1-6)} = \gamma$",                     loc='right', fontsize=SMALL_FS)
+    oneline = True
+    axs[0].set_title("$\gamma^{(1)} = \gamma$" + "" if oneline else "\n$\gamma^{(2-6)} = 0$",       loc='center', fontsize=SMALL_FS)
+    axs[1].set_title("$\gamma^{(1,2)} = \gamma$" + "" if oneline else "\n$\gamma^{(3-6)} = 0$",     loc='center', fontsize=SMALL_FS)
+    axs[2].set_title("$\gamma^{(1-3)} = \gamma$" + "" if oneline else "\n$\gamma^{(4-6)} = 0$",     loc='center', fontsize=SMALL_FS)
+    axs[3].set_title("$\gamma^{(1-4)} = \gamma$" + "" if oneline else "\n$\gamma^{(5,6)} = 0$",     loc='center', fontsize=SMALL_FS)
+    axs[4].set_title("$\gamma^{(1-5)} = \gamma$" + "" if oneline else "\n$\gamma^{(6)} = 0$",       loc='center', fontsize=SMALL_FS)
+    axs[5].set_title("$\gamma^{(1-6)} = \gamma$",                                                   loc='center', fontsize=SMALL_FS)
+
+def annotate_axs_d3_individual_gamma(axs, **kwargs):
+    axs = annotate_common(axs, n_expected=6, **kwargs)
+
+    axs[0].set_title("$R^{(1 \\leftarrow T)}_{\cdot | \cdot}$", loc='left', fontsize=TINY_FS)
+    axs[1].set_title("$R^{(1 \\leftarrow T)}_{\cdot | \cdot}$", loc='left', fontsize=TINY_FS)
+    axs[2].set_title("$R^{(1 \\leftarrow T)}_{\cdot | \cdot}$", loc='left', fontsize=TINY_FS)
+    axs[3].set_title("$R^{(1 \\leftarrow T)}_{\cdot | \cdot}$", loc='left', fontsize=TINY_FS)
+    axs[4].set_title("$R^{(1 \\leftarrow T)}_{\cdot | \cdot}$", loc='left', fontsize=TINY_FS)
+    axs[5].set_title("$R^{(1 \\leftarrow T)}_{\cdot | \cdot}$", loc='left', fontsize=TINY_FS)
+
+    oneline = True
+    axs[0].set_title("$\gamma^{(1)} = \gamma$", loc='center', fontsize=SMALL_FS)
+    axs[1].set_title("$\gamma^{(2)} = \gamma$", loc='center', fontsize=SMALL_FS)
+    axs[2].set_title("$\gamma^{(3)} = \gamma$", loc='center', fontsize=SMALL_FS)
+    axs[3].set_title("$\gamma^{(4)} = \gamma$", loc='center', fontsize=SMALL_FS)
+    axs[4].set_title("$\gamma^{(5)} = \gamma$", loc='center', fontsize=SMALL_FS)
+    axs[5].set_title("$\gamma^{(6)} = \gamma$", loc='center', fontsize=SMALL_FS)
 
 def annotate_axs_d3_all(axs, **kwargs):
     axs = annotate_common(axs, n_expected=1, **kwargs)
 
     axs[0].set_title("$R^{(1 \\leftarrow T)}_{\cdot | \cdot}$", loc='left',  fontsize=LARGE_FS)
-    axs[0].set_title("$\gamma^{(1-6)} = \gamma$",                 loc='right', fontsize=LARGE_FS)
+    axs[0].set_title("$\gamma^{(1-6)} = \gamma$",               loc='right', fontsize=LARGE_FS)
     
 def annotate_axs_individual(axs, ts=None, **kwargs):
     axs = annotate_common(axs, **kwargs)
@@ -97,7 +120,7 @@ def annotate_axs_individual(axs, ts=None, **kwargs):
 
     def annotate_one(ax, t):
         title="$R^{(" + str(t) + " \\leftarrow " + str(t+1) + ")}_{\cdot | \cdot}(\gamma)$"
-        ax.set_title(title, loc='left', fontsize=LARGE_FS)
+        ax.set_title(title, loc='left', fontsize=SMALL_FS)
 
     for ax, t in zip(axs, ts):
         annotate_one(ax, t)
