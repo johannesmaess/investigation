@@ -28,8 +28,11 @@ from util.util_pickle import *
 from util.util_cnn import first_mnist_batch, load_mnist_v4_models
 
 #### define LRP params
-# gamma_mode = 'cascading_gamma'
-gamma_mode = 'individual_gamma'
+
+perturb_baseline='max_diff'
+
+gamma_mode = 'cascading_gamma'
+# gamma_mode = 'individual_gamma'
 
 # gammas = gammas_0_1_21_inf
 gammas = gammas40
@@ -37,6 +40,11 @@ gammas = gammas40
 if   gammas is gammas40:          g_str = 'gammas40'
 elif gammas is gammas_0_1_21_inf: g_str = 'gammas_0_1_21_inf'
 else: assert 0
+
+
+perturb_func = None
+if perturb_baseline=='max_diff':
+    perturb_func = max_diff_replacement_by_indices
 
 modes = {0: 'LRP-0'}
 for i, l_ub in enumerate(d3_after_conv_layer):
@@ -48,9 +56,6 @@ for i, l_ub in enumerate(d3_after_conv_layer):
             if gamma_mode=='individual_gamma': modes[i*1000+j] = f'Gamma. l>{l_ub-2} l<{l_ub} gamma={g}'
 
 
-
-
-
 k = None # num points = all
 
 data, target = first_mnist_batch()
@@ -58,7 +63,7 @@ data, target = first_mnist_batch()
 y_batch = target.detach().numpy()
 x_batch =   data.detach().numpy().reshape((100, 1, 28, 28))
 
-pixFlipMetric = quantus.PixelFlipping(disable_warnings = False, perturb_baseline='black')
+pixFlipMetric = quantus.PixelFlipping(disable_warnings = False, perturb_func=perturb_func, perturb_baseline=perturb_baseline)
 
 def flipScores(a_batch, k=None):
     if k==None: k=len(a_batch)
@@ -86,5 +91,8 @@ for i, mode_str in enumerate(modes.values()):
     i += 1
     if i == i_task or n_tasks == 1:
         print(i, mode_str)
+        np.random.seed(42)
+        
         batch_scores = { mode_str: { 'PixFlip': flipScores(relevancies_per_mode[mode_str][0].numpy(), k) } }
-        save_data('d3', 'PixFlipScores__black__individual_gamma__gammas40', batch_scores, partition=(0, i))
+        save_data('d3', f'PixFlipScores__{perturb_baseline}__{gamma_mode}__{g_str}', batch_scores, partition=(0, i))
+        print('Saved.')

@@ -25,7 +25,7 @@ def max_diff_replacement_by_indices(
     """Modification / Extension of baseline_replacement_by_indices"""
     indices = expand_indices(arr, indices, indexed_axes)
 
-    arr_perturbed = copy.copy(arr)
+    arr_perturbed = copy(arr)
 
     org_val = arr[indices]
     flipped_val = 0 if org_val > 0.5 else 1
