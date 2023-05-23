@@ -543,6 +543,9 @@ def plot_vals_lineplot(vals, gammas=None,
                 
                 # put the matrices c value as text in the top right corner
                 annotate_c=None, # pass c values in same form as data
+
+                # option to pass axs (such that you can plot data on top of other plot)
+                axes = None, twinx=True,
                 ):
     """
     Plots the evolution of Eigenvalues with increasing gammas in a lineplot.
@@ -610,34 +613,46 @@ def plot_vals_lineplot(vals, gammas=None,
 
     if figsize is None: 
         figsize = (20, 10) if n_ax==(1,1) else (5*n_ax[1], 3*n_ax[0])
-    fig, axs = plt.subplots(*n_ax, figsize=figsize, sharey=sharey)
+    if axes:         
+        if twinx:
+            axs = np.vectorize(lambda ax: ax.twinx())(axes)
+        else:
+            axs = axes
+    else:       
+        fig, axs = plt.subplots(*n_ax, figsize=figsize, sharey=sharey)
     axs, ax_i, ax = np.array(axs).T.flatten(), -1, None
+    assert len(axs) == np.prod(n_ax), "passed axs do not match passed data."
 
-    if title is not None:
-        fig.suptitle(title)
-    else:
-        fig.suptitle(f'Evolution of {ylabel} with increasing $\gamma$' +
-                ('\nFat bar below indicates section of positive derivative' if mark_positive_slope else ''))
+    if not axes:
+        if title is not None:
+            fig.suptitle(title)
+        else:
+            fig.suptitle(f'Evolution of {ylabel} with increasing $\gamma$' +
+                    ('\nFat bar below indicates section of positive derivative' if mark_positive_slope else ''))
 
     ### helper functions ###
     def ax_init():
-        nonlocal axs, ax, ax_i, xlabel
+        nonlocal axs, ax, ax_i, xlabel, axes
         # iterate to next ax
         ax_i += 1
         ax = axs[ax_i]
 
-        # plt.figure(figsize=(20,10))
-        ax.set_xlabel(xlabel)
+        if axes and not twinx: return
+
+        ax.set_yscale(yscale)
         if i==0 or sharey==False: 
             ax.set_ylabel(ylabel)
 
         if green_line_at_x is not None: ax.axvline(green_line_at_x, color="green")
 
+        if axes: return
+        ax.set_xlabel(xlabel)
         ax.set_xscale(xscale)
-        ax.set_yscale(yscale)
         
     def ax_show():
-        nonlocal ax, xlim, ylim, legend
+        nonlocal ax, xlim, ylim, legend, axes
+
+        if axes and not twinx: return
 
         if (not legend) and (tag_line is not None):
             legend='upper right'
@@ -758,7 +773,8 @@ def plot_vals_lineplot(vals, gammas=None,
     if show:
         plt.show()
         
-    return fig, axs
+    if not axes:  
+        return fig, axs
 
 
 def plot_multiplicative_change(vals, gammas=None, hmean=False, end_at_0=False, **passed_kwargs):

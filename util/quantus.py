@@ -10,10 +10,14 @@ from quantus.helpers.utils import (
 from typing import Any, Callable, Sequence, Tuple, Union, Optional
 from copy import copy
 
+import matplotlib.pyplot as plt
+
 def batch_auc(batch):
     return [calculate_auc(np.array(curve)) for curve in batch]
 def batch_mean_auc(batch):
     return np.mean(batch_auc(batch))
+
+from IPython.display import clear_output
 
 def max_diff_replacement_by_indices(
     arr: np.array,
@@ -33,4 +37,14 @@ def max_diff_replacement_by_indices(
     # Perturb the array.
     arr_perturbed[indices] = flipped_val
 
+    if max_diff_replacement_by_indices.counter % 40 == 0:
+        clear_output(wait=True)
+        print(max_diff_replacement_by_indices.counter)
+        plt.imshow(arr_perturbed[0])
+        plt.show()
+        assert not input(), "Break by user."
+
+    max_diff_replacement_by_indices.counter += 1
+
     return arr_perturbed
+max_diff_replacement_by_indices.counter = 0
