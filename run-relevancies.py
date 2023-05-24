@@ -6,6 +6,8 @@ from util.util_lrp import layerwise_forward_pass, compute_relevancies
 from util.naming import *
 from util.util_pickle import *
 
+from multiprocessing import Manager, Pool
+
 # load v4 models
 model_dict = load_mnist_v4_models()
 model_d3 = model_dict['cb1-8-8-8_cb2-16-16-16_seed-0']
@@ -37,8 +39,6 @@ data, target = next(iter(test_loader))
 A, layers = layerwise_forward_pass(model_d3, data)
 L = len(layers)
 
-from multiprocessing import Manager, Pool
-
 def func(mode, shared_dict):
     rels = compute_relevancies(mode=mode, layers=layers, A=A, output_rels='correct class', target=target, return_only_l=0)
     if mode!="info": shared_dict[mode] = rels
@@ -48,7 +48,7 @@ if __name__ == '__main__':
     with Manager() as manager:
         shared_dict = manager.dict()
 
-        num_processes = 32  # Set the desired number of parallel threads
+        num_processes = 4  # Set the desired number of parallel threads
         pool = Pool(processes=num_processes)
 
         args = [(mode, shared_dict) for mode in list(modes.values())]
