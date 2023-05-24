@@ -50,8 +50,7 @@ if __name__ == '__main__':
         num_processes = 16  # Set the desired number of parallel threads
         pool = Pool(processes=num_processes)
 
-        k = 4
-        args = [(mode, shared_dict) for mode in list(modes.values())[:k]]
+        args = [(mode, shared_dict) for mode in list(modes.values())]
         with Pool(processes=num_processes) as pool:
             pool.starmap(func, args)
 
