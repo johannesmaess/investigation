@@ -85,7 +85,7 @@ def func(mode_str, dict_rels, shared_dict_scores):
     print("Done with mode:", mode_str)
 
 if __name__ == '__main__':
-    partition = (i_task-1, 0)
+    partition = (0, i_task-1)
 
     # load v4 models
     model_dict = load_mnist_v4_models()
@@ -105,5 +105,5 @@ if __name__ == '__main__':
     dict_scores = {}
     func(mode_str, relevancies_per_mode, dict_scores)
 
-    save_data('d3', f'PixFlipScores__{perturb_baseline}__{gamma_mode}__{g_str}', dict_scores, partition=partition)
+    save_data('d3', f'PixFlipScores__testset__{perturb_baseline}__{gamma_mode}__{g_str}', dict_scores, partition=partition)
     print('Saved.')
