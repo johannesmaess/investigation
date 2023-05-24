@@ -9,7 +9,6 @@ n_tasks = 235
 import os
 import sys
 
-
 if 'SGE_TASK_ID' in os.environ:
     sys.path.append("/home/johannes/Masterarbeit")
     i_task = int(os.environ['SGE_TASK_ID'])
@@ -27,72 +26,84 @@ from util.common import *
 from util.util_pickle import *
 from util.util_cnn import first_mnist_batch, load_mnist_v4_models
 
-#### define LRP params
+from multiprocessing import Manager, Pool
 
-perturb_baseline='max_diff'
+#### define LRP & PixFlip params
+
+perturb_baseline='black'
+# perturb_baseline='max_diff'
 
 gamma_mode = 'cascading_gamma'
 # gamma_mode = 'individual_gamma'
 
-# gammas = gammas_0_1_21_inf
 gammas = gammas40
+# gammas = gammas_0_1_21_inf
 
 if   gammas is gammas40:          g_str = 'gammas40'
 elif gammas is gammas_0_1_21_inf: g_str = 'gammas_0_1_21_inf'
 else: assert 0
 
-
 perturb_func = None
 if perturb_baseline=='max_diff':
     perturb_func = max_diff_replacement_by_indices
 
-modes = {0: 'LRP-0'}
-for i, l_ub in enumerate(d3_after_conv_layer):
-    for j, g in enumerate(gammas):
-        if g=='inf': g = 1e8
-        if g!=0:
-            g = np.round(g, 8)
-            if gamma_mode=='cascading_gamma':  modes[i*1000+j] = f'Gamma.            l<{l_ub} gamma={g}'
-            if gamma_mode=='individual_gamma': modes[i*1000+j] = f'Gamma. l>{l_ub-2} l<{l_ub} gamma={g}'
-
-
-k = None # num points = all
-
-data, target = first_mnist_batch()
+data, target = first_mnist_batch(batch_size=1000000) # num points = all
 
 y_batch = target.detach().numpy()
-x_batch =   data.detach().numpy().reshape((100, 1, 28, 28))
+x_batch =   data.detach().numpy().reshape((-1, 1, 28, 28))
 
-pixFlipMetric = quantus.PixelFlipping(disable_warnings = False, perturb_func=perturb_func, perturb_baseline=perturb_baseline)
+pixFlipMetric = quantus.PixelFlipping(disable_warnings = True, perturb_func=perturb_func, perturb_baseline=perturb_baseline)
 
-def flipScores(a_batch, k=None):
-    if k==None: k=len(a_batch)
+def flipScores(x_batch, y_batch, a_batch):
     return pixFlipMetric(
         model=model,
-        x_batch=x_batch[:k],
-        y_batch=y_batch[:k],
-        a_batch=a_batch[:k],
+        x_batch=x_batch,
+        y_batch=y_batch,
+        a_batch=a_batch,
         device=device
     )
 
-# load v4 models
-model_dict = load_mnist_v4_models()
-model = model_dict[d3_tag]
-model.eval()
+def func(mode_str, dict_rels, shared_dict_scores):
+    n = 100
+    np.random.seed(42)
+    scores = []
+    a_batch = dict_rels[mode_str].numpy()
+    assert len(x_batch) == len(y_batch) == len(a_batch), f"Not matching shape: {x_batch.shape}, {y_batch.shape}, {a_batch.shape}"
 
+    print("Starting mode:", mode_str)
+    for i in tqdm(range(0, len(a_batch), n)):
+        # create minibatches to pass to pixflip system
+        xb = x_batch[i:i+n]
+        yb = y_batch[i:i+n]
+        ab = a_batch[i:i+n]
+        assert len(xb) == len(yb) == len(ab), f"Not matching shape: {xb.shape}, {yb.shape}, {ab.shape}"
 
-### load relevancies
+        minibatch_scores = flipScores(xb, yb, ab)
+        scores.append(minibatch_scores)
 
-assert (relevancies_per_mode := load_data('d3', f'Rels__m0_to_0__{gamma_mode}__{g_str}'))
+    shared_dict_scores[mode_str] = { 'PixFlip': np.concatenate(scores, axis=0) }
+    print("Done with mode:", mode_str)
 
-### partitioned computation
-if n_tasks != 1: assert n_tasks == len(modes.values()), f"{n_tasks} != {len(modes.values())}"
-for i, mode_str in enumerate(modes.values()):
-    i += 1
-    if i == i_task or n_tasks == 1:
-        print(i, mode_str)
-        np.random.seed(42)
-        
-        batch_scores = { mode_str: { 'PixFlip': flipScores(relevancies_per_mode[mode_str][0].numpy(), k) } }
-        save_data('d3', f'PixFlipScores__{perturb_baseline}__{gamma_mode}__{g_str}', batch_scores, partition=(0, i))
-        print('Saved.')
+if __name__ == '__main__':
+    partition = (i_task-1, 0)
+
+    # load v4 models
+    model_dict = load_mnist_v4_models()
+    model = model_dict[d3_tag]
+    model.eval()
+
+    ### load relevancies
+
+    assert (relevancies_per_mode := load_data('d3', f'Rel0__m0_to_0__{gamma_mode}__{g_str}', partition=partition))
+    assert len(relevancies_per_mode) == 1, len(relevancies_per_mode)
+    mode_str = next(iter(relevancies_per_mode))
+
+    print("Relevancies shape:", relevancies_per_mode[mode_str].shape)
+    assert len(relevancies_per_mode[mode_str]) ==len(x_batch) == len(y_batch), \
+        f"{relevancies_per_mode[mode_str].shape}, {x_batch.shape}, {y_batch.shape}"
+
+    dict_scores = {}
+    func(mode_str, relevancies_per_mode, dict_scores)
+
+    save_data('d3', f'PixFlipScores__{perturb_baseline}__{gamma_mode}__{g_str}', dict_scores, partition=partition)
+    print('Saved.')

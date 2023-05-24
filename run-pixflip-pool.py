@@ -27,9 +27,7 @@ perturb_func = None
 if perturb_baseline=='max_diff':
     perturb_func = max_diff_replacement_by_indices
 
-
-k = 1000000 # num points = all
-data, target = first_mnist_batch(batch_size=k)
+data, target = first_mnist_batch(batch_size=1000000) # num points = all
 
 y_batch = target.detach().numpy()
 x_batch =   data.detach().numpy().reshape((-1, 1, 28, 28))
