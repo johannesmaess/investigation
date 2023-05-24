@@ -42,12 +42,13 @@ from multiprocessing import Manager, Pool
 def func(mode, shared_dict):
     rels = compute_relevancies(mode=mode, layers=layers, A=A, output_rels='correct class', target=target, return_only_l=0)
     if mode!="info": shared_dict[mode] = rels
+    print("Done with mode:", mode)
 
 if __name__ == '__main__':
     with Manager() as manager:
         shared_dict = manager.dict()
 
-        num_processes = 16  # Set the desired number of parallel threads
+        num_processes = 32  # Set the desired number of parallel threads
         pool = Pool(processes=num_processes)
 
         args = [(mode, shared_dict) for mode in list(modes.values())]
@@ -57,4 +58,7 @@ if __name__ == '__main__':
         relevancies_per_mode = dict(shared_dict)
 
     print(relevancies_per_mode.keys())
+    print(len(relevancies_per_mode.keys()))
+
     save_data('d3', f'Rel0__m0_to_0__{gamma_mode}__{g_str}', relevancies_per_mode)
+    print("Done saving.")
