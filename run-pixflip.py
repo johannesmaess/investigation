@@ -30,8 +30,9 @@ from multiprocessing import Manager, Pool
 
 #### define LRP & PixFlip params
 
-perturb_baseline='black'
-# perturb_baseline='max_diff'
+baselines = ['black', 'white', 'mean', 'max_diff']
+perturb_baseline = baselines[3]
+print(perturb_baseline)
 
 gamma_mode = 'cascading_gamma'
 # gamma_mode = 'individual_gamma'

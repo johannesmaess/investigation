@@ -37,7 +37,7 @@ def max_diff_replacement_by_indices(
     # Perturb the array.
     arr_perturbed[indices] = flipped_val
 
-    if max_diff_replacement_by_indices.counter % 40 == 0:
+    if max_diff_replacement_by_indices.counter % 40 == -1:
         clear_output(wait=True)
         print(max_diff_replacement_by_indices.counter)
         plt.imshow(arr_perturbed[0])
