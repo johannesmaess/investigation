@@ -284,9 +284,12 @@ def calc_mats_batch_functional(mat_funcs, gammas, points, tqdm_for='matrix', pic
 ## d3 model
 def funcs_cascading__d3__m1_to_1(model): # m1 to 1
     return [partial(LRP_global_mat, model=model, l_inp=1, l_out=-3, l_ub=l_ub, delete_unactivated_subnetwork=True) for l_ub in d3_after_conv_layer[:-1]]
-
+def funcs_cascading__d3__m0_to_1(model): # m0 to 1
+    return [partial(LRP_global_mat, model=model, l_inp=1, l_out=-1, l_ub=l_ub, delete_unactivated_subnetwork=True) for l_ub in d3_after_conv_layer[:-1]]
 def funcs_inv_cascading__d3__m1_to_1(model): # m1 to 1
     return [partial(LRP_global_mat, model=model, l_inp=1, l_out=-3, l_lb=l_ub-2, delete_unactivated_subnetwork=True) for l_ub in d3_after_conv_layer[:-1][::-1]]
+def funcs_individual__d3(model):
+    return [partial(LRP_global_mat, model=model, l_inp=l_out-1, l_out=l_out, delete_unactivated_subnetwork=True) for l_out in d3_after_conv_layer[:-1]]
 
 ## s4 models
 def funcs_individual__s4(model):
