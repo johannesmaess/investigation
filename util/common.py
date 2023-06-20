@@ -25,8 +25,9 @@ def match_gammas(vals):
     if num==5: return gammas5
     if num==22: return gammas_0_1_21_inf
     if num==40: return gammas40
+    if num==80: return gammas80
 
-    print("Provide gammas manually, if they are not any of {gammas3, gammas5, gammas_0_1_21_inf, gammas40}.")
+    print("Provide gammas manually, if they are not any of {gammas3, gammas5, gammas_0_1_21_inf, gammas40, gammas80}.")
     assert 0
     
 def parse_partition(n_weights, n_points, partition):
@@ -50,6 +51,7 @@ def parse_partition(n_weights, n_points, partition):
 LARGE_FS = 24
 SMALL_FS = 15
 TINY_FS = 12
+purple = (min(67/255, 1), min(1/255, 1), min(84/255, 1))
 
 def annotate_common(axs, n_expected=None, xlabel='$\gamma$', ylabel=None, yvertical=True):
     axs = np.array(axs).flatten()
@@ -68,41 +70,55 @@ def annotate_common(axs, n_expected=None, xlabel='$\gamma$', ylabel=None, yverti
 
     return axs
 
-def annotate_axs_d3_cascading(axs, **kwargs):
-    axs = annotate_common(axs, n_expected=6, **kwargs)
+def annotate_axs_d3_cascading(axs, n_expected=6, pf=False, left=False, **kwargs):
+    axs = annotate_common(axs, n_expected=n_expected, **kwargs)
 
-    axs[0].set_title("$R^{(1 \\leftarrow T)}_{\cdot | \cdot}$", loc='left', fontsize=TINY_FS)
-    axs[1].set_title("$R^{(1 \\leftarrow T)}_{\cdot | \cdot}$", loc='left', fontsize=TINY_FS)
-    axs[2].set_title("$R^{(1 \\leftarrow T)}_{\cdot | \cdot}$", loc='left', fontsize=TINY_FS)
-    axs[3].set_title("$R^{(1 \\leftarrow T)}_{\cdot | \cdot}$", loc='left', fontsize=TINY_FS)
-    axs[4].set_title("$R^{(1 \\leftarrow T)}_{\cdot | \cdot}$", loc='left', fontsize=TINY_FS)
-    axs[5].set_title("$R^{(1 \\leftarrow T)}_{\cdot | \cdot}$", loc='left', fontsize=TINY_FS)
-
-    oneline = True
-    axs[0].set_title("$\gamma^{(1)} = \gamma$" + "" if oneline else "\n$\gamma^{(2-6)} = 0$",       loc='center', fontsize=SMALL_FS)
-    axs[1].set_title("$\gamma^{(1,2)} = \gamma$" + "" if oneline else "\n$\gamma^{(3-6)} = 0$",     loc='center', fontsize=SMALL_FS)
-    axs[2].set_title("$\gamma^{(1-3)} = \gamma$" + "" if oneline else "\n$\gamma^{(4-6)} = 0$",     loc='center', fontsize=SMALL_FS)
-    axs[3].set_title("$\gamma^{(1-4)} = \gamma$" + "" if oneline else "\n$\gamma^{(5,6)} = 0$",     loc='center', fontsize=SMALL_FS)
-    axs[4].set_title("$\gamma^{(1-5)} = \gamma$" + "" if oneline else "\n$\gamma^{(6)} = 0$",       loc='center', fontsize=SMALL_FS)
-    axs[5].set_title("$\gamma^{(1-6)} = \gamma$",                                                   loc='center', fontsize=SMALL_FS)
-
-def annotate_axs_d3_individual_gamma(axs, **kwargs):
-    axs = annotate_common(axs, n_expected=6, **kwargs)
-
-    axs[0].set_title("$R^{(1 \\leftarrow T)}_{\cdot | \cdot}$", loc='left', fontsize=TINY_FS)
-    axs[1].set_title("$R^{(1 \\leftarrow T)}_{\cdot | \cdot}$", loc='left', fontsize=TINY_FS)
-    axs[2].set_title("$R^{(1 \\leftarrow T)}_{\cdot | \cdot}$", loc='left', fontsize=TINY_FS)
-    axs[3].set_title("$R^{(1 \\leftarrow T)}_{\cdot | \cdot}$", loc='left', fontsize=TINY_FS)
-    axs[4].set_title("$R^{(1 \\leftarrow T)}_{\cdot | \cdot}$", loc='left', fontsize=TINY_FS)
-    axs[5].set_title("$R^{(1 \\leftarrow T)}_{\cdot | \cdot}$", loc='left', fontsize=TINY_FS)
+    Rstr = "$R^{(1 \\leftarrow T)}_{\cdot | \cdot}$"
+    if not left and not pf:
+        for ax in axs:
+            ax.set_title(p, loc='left', fontsize=TINY_FS)
+        Rstr=""
+    elif pf:
+        Rstr=""
+    else:
+        Rstr += ", "
 
     oneline = True
-    axs[0].set_title("$\gamma^{(1)} = \gamma$", loc='center', fontsize=SMALL_FS)
-    axs[1].set_title("$\gamma^{(2)} = \gamma$", loc='center', fontsize=SMALL_FS)
-    axs[2].set_title("$\gamma^{(3)} = \gamma$", loc='center', fontsize=SMALL_FS)
-    axs[3].set_title("$\gamma^{(4)} = \gamma$", loc='center', fontsize=SMALL_FS)
-    axs[4].set_title("$\gamma^{(5)} = \gamma$", loc='center', fontsize=SMALL_FS)
-    axs[5].set_title("$\gamma^{(6)} = \gamma$", loc='center', fontsize=SMALL_FS)
+    kw = { 'fontsize': SMALL_FS }
+    if pf:      kw['loc'] = 'right'; kw['color'] = purple
+    elif left:  kw['loc'] = 'left'
+    else:       kw['loc'] = 'center'
+
+    axs[0].set_title(Rstr + "$\gamma^{(1)} = \gamma$" + "" if oneline else "\n$\gamma^{(2-6)} = 0$",    **kw)
+    if n_expected==1: return
+    axs[1].set_title(Rstr + "$\gamma^{(1,2)} = \gamma$" + "" if oneline else "\n$\gamma^{(3-6)} = 0$",  **kw)
+    if n_expected==2: return
+    axs[2].set_title(Rstr + "$\gamma^{(1-3)} = \gamma$" + "" if oneline else "\n$\gamma^{(4-6)} = 0$",  **kw)
+    if n_expected==3: return
+    axs[3].set_title(Rstr + "$\gamma^{(1-4)} = \gamma$" + "" if oneline else "\n$\gamma^{(5,6)} = 0$",  **kw)
+    if n_expected==4: return
+    axs[4].set_title(Rstr + "$\gamma^{(1-5)} = \gamma$" + "" if oneline else "\n$\gamma^{(6)} = 0$",    **kw)
+    if n_expected==5: return
+    axs[5].set_title(Rstr + "$\gamma^{(1-6)} = \gamma$",                                                **kw)
+
+def annotate_axs_d3_individual_gamma(axs, pf=False, left=False, **kwargs):
+    kwargs.setdefault('n_expected', 6)
+    axs = annotate_common(axs, **kwargs)
+    for i, ax in enumerate(axs):
+        Rstr = "$R^{(1 \\leftarrow T)}_{\cdot | \cdot}$"
+        gstr = "$\gamma^{(" + str(i+1) + ")} = \gamma$"
+        if pf:
+            # annotate for Pixelflipping: only gamma, in purple, on the right.
+            ax.set_title(gstr, loc='right', fontsize=SMALL_FS, color=purple)
+            continue
+
+        if not left:
+            # print on left and in the middle
+            ax.set_title(Rstr, loc='left', fontsize=TINY_FS)
+            ax.set_title(gstr, loc='center', fontsize=SMALL_FS)
+        else:
+            # print on left and in the middle
+            ax.set_title(Rstr + ", "+ gstr, loc='left', fontsize=SMALL_FS)
 
 def annotate_axs_d3_all(axs, **kwargs):
     axs = annotate_common(axs, n_expected=1, **kwargs)
@@ -113,7 +129,7 @@ def annotate_axs_d3_all(axs, **kwargs):
 def annotate_axs_individual(axs, ts=None, **kwargs):
     axs = annotate_common(axs, **kwargs)
     if ts is None:
-        ts = np.arange(len(axs))
+        ts = np.arange(len(axs)) + 1
     else:
         ts = np.array(ts).flatten()
         assert len(ts) == len(axs)
