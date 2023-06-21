@@ -2,8 +2,8 @@
 #$ -q all.q
 #$ -cwd
 #$ -V
-#$ -t 1-600
-n_tasks = 600
+#$ -t 1-100
+n_tasks = 100
 
 ### Configure on local / Qsub system ###
 import os
@@ -16,7 +16,7 @@ if 'SGE_TASK_ID' in os.environ:
     assert 1 <= i_task <= n_tasks
 else:
     print("Running in non-parallel mode.")
-    i_task, n_tasks = 700,700
+    i_task, n_tasks = 1,1
 
 ### Imports ###
 from util.util_gamma_rule import calc_vals_batch
@@ -42,8 +42,12 @@ partition = (i_task-1) % n_partitions
 
 
 # overwrite
-num = 5
+num = 0
 partition = i_task-1
+
+if num == 0:
+    model=model_dict[d3_tag]
+    model_key =     'd3'
 
 if num == 1:
     model=model_dict[s4f3_tag]
@@ -67,7 +71,7 @@ if num == 5:
     
     
     
-pickle_key =   (model_key, 'svals__individual_layer__gammas80')
+pickle_key =   (model_key, 'svals__individual_layer__gammas400')
 
 print(pickle_key, 'i_task', i_task, 'num', num, 'partition', partition)
 
@@ -79,7 +83,7 @@ if LRP:
     mat_funcs = funcs_individual__d3(model)
     
     print("Computing mats...")
-    calc_mats_batch_functional(mat_funcs, gammas80, d, pickle_key=pickle_key, overwrite=False, tqdm_for='gamma', partition=partition)
+    calc_mats_batch_functional(mat_funcs, gammas400, d, pickle_key=pickle_key, overwrite=False, tqdm_for='gamma', partition=partition)
     print("Done with mats.")
 
 if SVALS:

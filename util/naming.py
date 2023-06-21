@@ -14,7 +14,7 @@ gammas_0_1_21_inf = list(np.linspace(0,1,21).round(3)) + ['inf']
 # from 0 to 1000, roughly log distributed:
 gammas40 = np.concatenate(([0, 1e-5, 3e-5, 1e-4, 3e-4], np.linspace(0.001, .01, 7)[:-1], np.linspace(0.01, .05, 7)[:-1], np.linspace(.05, .2, 7)[:-1], np.linspace(.2, 1, 7), 2**(np.arange(10)+1)))
 gammas80 = np.logspace(-5, 4, 80)
-
+gammas400 = np.linspace(0,10,400)
 
 ### shap
 
