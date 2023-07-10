@@ -16,6 +16,10 @@ gammas40 = np.concatenate(([0, 1e-5, 3e-5, 1e-4, 3e-4], np.linspace(0.001, .01, 
 gammas80 = np.logspace(-5, 4, 80)
 gammas400 = np.linspace(0,10,400)
 
+# mask some such that it's nicer in the plots:
+gammas40_mask = np.array([0, 0, 0, 0, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0, 0, 1, 1, 0, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0
+, 0, 0, 0], dtype=bool)
+
 ### shap
 
 all_shap_metric_tags = []

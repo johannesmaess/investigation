@@ -69,7 +69,7 @@ def heatmap(R,sx=2,sy=2, colorbar=False):
     plt.axis('off')
     ret = plt.imshow(R,cmap=my_cmap,vmin=-b,vmax=b,interpolation='nearest')
     if colorbar: plt.colorbar(ret)
-    plt.show()
+    # plt.show()
 
 def heatmap_batch(R_batch,sx,sy):
 
@@ -80,8 +80,8 @@ def heatmap_batch(R_batch,sx,sy):
 
     fig, axs = plt.subplots(1, len(R_batch), figsize=(sx * len(R_batch),sy))
     plt.subplots_adjust(left=0,right=1,bottom=0,top=1)
-    plt.axis('off')
     for R, ax in zip(R_batch, axs):
+        ax.axis('off')
         if np.isnan(R).sum(): 
             print(np.isnan(R).mean(dtype=float))
             continue

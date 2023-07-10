@@ -19,13 +19,14 @@ class HiddenPrints:
 ### convenience function to get the right gamma array, based on svals shape
         
 def match_gammas(vals):
-    num = vals.shape[2]
+    num = len(vals[0][0])
     
     if num==3: return gammas3
     if num==5: return gammas5
     if num==22: return gammas_0_1_21_inf
     if num==40: return gammas40
     if num==80: return gammas80
+    if num==400: return gammas400
 
     print("Provide gammas manually, if they are not any of {gammas3, gammas5, gammas_0_1_21_inf, gammas40, gammas80}.")
     assert 0
@@ -120,11 +121,11 @@ def annotate_axs_d3_individual_gamma(axs, pf=False, left=False, **kwargs):
             # print on left and in the middle
             ax.set_title(Rstr + ", "+ gstr, loc='left', fontsize=SMALL_FS)
 
-def annotate_axs_d3_all(axs, **kwargs):
+def annotate_axs_all(axs, **kwargs):
     axs = annotate_common(axs, n_expected=1, **kwargs)
 
     axs[0].set_title("$R^{(1 \\leftarrow T)}_{\cdot | \cdot}$", loc='left',  fontsize=LARGE_FS)
-    axs[0].set_title("$\gamma^{(1-6)} = \gamma$",               loc='right', fontsize=LARGE_FS)
+    axs[0].set_title("$\gamma^{(1-T)} = \gamma$",               loc='right', fontsize=LARGE_FS)
     
 def annotate_axs_individual(axs, ts=None, **kwargs):
     axs = annotate_common(axs, **kwargs)
