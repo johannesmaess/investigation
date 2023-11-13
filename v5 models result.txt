@@ -1,0 +1,30 @@
+Stored trained model with params={'v': 5, 'seed': 0, 'Fs': [3, 3, 3, 3, 3, 3, 3, 3]}. 	Last accuracy: 9.714285850524902 at time 50000.
+Stored trained model with params={'v': 5, 'seed': 0, 'Fs': [3, 3, 3, 3, 3, 3]}. 		Last accuracy: 97.75 at time 50000.
+Stored trained model with params={'v': 5, 'seed': 0, 'Fs': [3, 3, 3, 3]}. 				Last accuracy: 97.35713958740234 at time 50000.
+Stored trained model with params={'v': 5, 'seed': 0, 'Fs': [3, 3]}. 					Last accuracy: 73.05952453613281 at time 50000.
+
+Stored trained model with params={'v': 5, 'seed': 1, 'Fs': [3, 3, 3, 3, 3, 3, 3, 3]}. 	Last accuracy: 10.821428298950195 at time 50000.
+Stored trained model with params={'v': 5, 'seed': 1, 'Fs': [3, 3, 3, 3, 3, 3]}. 		Last accuracy: 10.821428298950195 at time 50000.
+Stored trained model with params={'v': 5, 'seed': 1, 'Fs': [3, 3, 3, 3]}. 				Last accuracy: 97.17857360839844 at time 50000.
+Stored trained model with params={'v': 5, 'seed': 1, 'Fs': [3, 3]}. 					Last accuracy: 59.92856979370117 at time 50000.
+
+Stored trained model with params={'v': 5, 'seed': 0, 'Fs': [5, 5, 5, 5, 5, 5, 5, 5]}. 	Last accuracy: 10.821428298950195 at time 50000.
+Stored trained model with params={'v': 5, 'seed': 0, 'Fs': [5, 5, 5, 5, 5, 5]}. 		Last accuracy: 7.702380657196045 at time 50000.
+Stored trained model with params={'v': 5, 'seed': 0, 'Fs': [5, 5, 5, 5]}. 				Last accuracy: 86.08333587646484 at time 50000.
+Stored trained model with params={'v': 5, 'seed': 0, 'Fs': [5, 5]}. 					Last accuracy: 92.10713958740234 at time 50000.
+
+Stored trained model with params={'v': 5, 'seed': 1, 'Fs': [5, 5, 5, 5, 5, 5, 5, 5]}. 	Last accuracy: 9.714285850524902 at time 50000.
+Stored trained model with params={'v': 5, 'seed': 1, 'Fs': [5, 5, 5, 5, 5, 5]}. 		Last accuracy: 9.714285850524902 at time 50000.
+Stored trained model with params={'v': 5, 'seed': 1, 'Fs': [5, 5, 5, 5]}. 				Last accuracy: 98.64285278320312 at time 50000.
+Stored trained model with params={'v': 5, 'seed': 1, 'Fs': [5, 5]}. 					Last accuracy: 92.95237731933594 at time 50000.
+
+Stored trained model with params={'v': 5, 'seed': 0, 'Fs': [7, 7, 7, 7, 7, 7, 7, 7]}. 	Last accuracy: 10.821428298950195 at time 50000.
+Stored trained model with params={'v': 5, 'seed': 0, 'Fs': [7, 7, 7, 7, 7, 7]}. 		Last accuracy: 97.48809051513672 at time 50000.
+Stored trained model with params={'v': 5, 'seed': 0, 'Fs': [7, 7, 7, 7]}. 				Last accuracy: 98.66666412353516 at time 50000.
+Stored trained model with params={'v': 5, 'seed': 0, 'Fs': [7, 7]}. 					Last accuracy: 95.80952453613281 at time 50000.
+
+Stored trained model with params={'v': 5, 'seed': 1, 'Fs': [7, 7, 7, 7, 7, 7, 7, 7]}. 	Last accuracy: 9.714285850524902 at time 50000.
+Stored trained model with params={'v': 5, 'seed': 1, 'Fs': [7, 7, 7, 7, 7, 7]}. 		Last accuracy: 10.630951881408691 at time 50000.
+Stored trained model with params={'v': 5, 'seed': 1, 'Fs': [7, 7, 7, 7]}. 				Last accuracy: 9.714285850524902 at time 50000.
+Stored trained model with params={'v': 5, 'seed': 1, 'Fs': [7, 7]}. 					Last accuracy: 95.71428680419922 at time 50000.
+

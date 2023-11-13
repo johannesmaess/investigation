@@ -1,15 +1,14 @@
 from functools import partial
-from tqdm.notebook import tqdm
+from tqdm import tqdm
 
 import numpy as np
 from numpy.linalg import eig, svd
 
-from util.util_data_summary import pretty_num
-from util.common import HiddenPrints
+from util.common import parse_partition
+from util.naming import *
+from util.util_pickle import load_data, save_data
 
 import torch
-
-from scipy import stats
 from scipy.sparse import coo_array
 
 import matplotlib as mpl
@@ -328,14 +327,19 @@ def calc_vals(M, num_vals, return_vecs=False, svd_mode=True, abs_vals=False):
 
         if not svd_mode:     vals, vecs    = eigs(M, k=num_vals, which="LM")
         else:            
-            if return_vecs: vecs, vals, _ = svds(M, k=num_vals, which="LM", return_singular_vectors='u'  )
-            else:                  vals   = svds(M, k=num_vals, which="LM", return_singular_vectors=False)
+            # computation of smallest svals by passing negative k:
+            # issue with argpack: doesnt converge sometimes
+            # issue with propack: how many? sometimes last one is 0.
+            if num_vals < 0: which="SM"; num_vals = -num_vals
+            else:            which="LM"
+            if return_vecs: lvecs, vals, rvecs = svds(M, k=num_vals, which=which, return_singular_vectors=True)
+            else:                  vals        = svds(M, k=num_vals, which=which, return_singular_vectors=False)
     elif type(M) is np.ndarray:
         if np.any(np.isnan(M)):
             print(M)
             return
-        if not svd_mode: vals, vecs    = eig(M)
-        else:            vecs, vals, _ = svd(M, full_matrices=False)
+        if not svd_mode: vals, lvecs        = eig(M)
+        else:            lvecs, vals, rvecs = svd(M, full_matrices=False)
     else:
         raise Exception(f"Invalid type {type(M)}")
 
@@ -346,12 +350,26 @@ def calc_vals(M, num_vals, return_vecs=False, svd_mode=True, abs_vals=False):
     order = np.argsort(-np.abs(vals), axis=0)[:num_vals]
 
     # return sorted vals and vecs
-    return (vals[order], np.array(vecs).T[order] if return_vecs else None)
+    vals = vals[order]
+    if return_vecs:
+        lvecs = np.array(lvecs).T[order]
+        if svd_mode:
+            rvecs = np.array(rvecs)[order]
+            return vals, lvecs, rvecs
+        return vals, lvecs
+    return vals
 
-def calc_vals_batch(matrices, num_vals='auto', return_vecs=False, svd_mode=True, abs_vals=False, tqdm_for='matrix'):
+
+def calc_vals_batch(matrices=None, num_vals='auto', return_vecs=False, svd_mode=True, abs_vals=False, tqdm_for='point', pickle_key=None, overwrite=False, partition=None, matrices_shape=None):
     """
     Wraps around calc_evals to make calls for multiple weights, and multiple reference points.
     Mostly useful for determining an efficient number of vals to compute per matrix, putting the results into uniform arrays, and its checks.
+
+    Tries to load the previously computed result first.
+
+    overwrite - Don't load previous result. Compute and overwrite it.
+    partition = (i, j) - only the i'th weight and j'th poitn are computes, and saved with appendix __wi__pj .
+
     """
     # display progress util
     itg, itp, itm = [lambda x: x]*3
@@ -359,19 +377,72 @@ def calc_vals_batch(matrices, num_vals='auto', return_vecs=False, svd_mode=True,
     if tqdm_for=='point':  itp = tqdm
     if tqdm_for=='gamma':  itg = tqdm
 
+    if pickle_key is not None:
+        mkey, dkey = pickle_key
+        ind = dkey.find('__')
+
+        # key for loading LRP matrices: "LRP__..."
+        dkey_lrp = 'LRP' + dkey[ind:]
+
+        # if passed key is of form "__..." default to "svals__..."
+        if num_vals == 'auto':
+            dkey = 'svals' + dkey[ind:]
+        elif type(num_vals) is int:
+            dkey = f'svals{num_vals}' + dkey[ind:]
+        else:
+            assert 0, f"Invalid num_vals {num_vals}"
+
+        # try loading the data
+        if not overwrite:
+            vals = load_data(mkey, dkey)
+            if vals is not False:
+                if matrices is not None: assert vals.shape[:3] == matrices.shape[:3], "Found svals in storage, but they do not match the passed matrices."
+                if partition is not None: print("Found unpartitioned, full result. Returning.")
+                return vals
+
+        # if matrices are not passed, try to load them
+        if matrices is None:
+            matrices = load_data(mkey, dkey_lrp)
+            if matrices is False: 
+                assert  partition is not False, "matrices are not passed, and can not be loaded from storage."
+            else:
+                marices_shape = len(matrices), len(matrices[0])
+            
+
+        # for saving the svals
+        def save_func(x): 
+            print("Saving vals under key:", (mkey, dkey))
+            save_data(mkey, dkey, x, partition=partition)
+    else:
+        save_func = lambda x: 0
+        assert matrices is not None, "Neither the matrices, nor a key for loading them from storage is passed."
+        
+    if partition is not None:
+        partition = parse_partition(*matrices_shape, partition)
+        w, p = partition
+        if matrices not in [False, None]:
+            matrices = matrices[w:w+1, p:p+1]
+        else:
+            matrices = load_data(mkey, dkey_lrp, partition=partition)
+        
+    
+    assert matrices is not False, "matrices are not passed, and can not be loaded from storage."
+            
+    # print('type(matrices):', type(matrices))
     n_weights, n_points, n_gammas = len(matrices), len(matrices[0]), len(matrices[0][0])
-    assert len(matrices[0][0][0].shape) == 2, "'matrices' should contain 2D arrays (np.ndarray or scipy.coo_array), nested in a 2D structure"
+    m0 = matrices[0][0][0]
+    assert len(m0.shape) == 2, "'matrices' should contain 2D arrays (np.ndarray or scipy.coo_array), nested in a 3D structure"
 
     if abs_vals or svd_mode: dtype=np.float
     else:                    dtype=np.cfloat
 
     # if return_evcs==True, we want all matrices to be of the same size. also extrace vec_len.
     if return_vecs: 
-        vec_len = matrices[0, 0, 0].shape[0]
+        vec_len = m0.shape[0]
         for i, matrices_per_weight in enumerate(matrices):
             for j, matrices_per_point in enumerate(matrices_per_weight):
                 for k, matrix_per_gamma in enumerate(matrices_per_point):
-                    assert matrix_per_gamma.shape == matrices[0,0,0].shape, "Pass only matrices of same shape"
+                    assert matrix_per_gamma.shape == m0.shape, "Pass only matrices of same shape"
 
     # calculate upper bound for rank of matrix
     max_rank_per_matrix = np.zeros((n_weights, n_points), dtype=int)
@@ -384,28 +455,52 @@ def calc_vals_batch(matrices, num_vals='auto', return_vecs=False, svd_mode=True,
                 max_rank_per_matrix[i,j] = min([np.sum(np.any(W, axis=0)), np.sum(np.any(W, axis=1))])
 
     # valculate the number of vals to be requested per matrix
-    vals_per_matrix = max_rank_per_matrix if num_vals=='auto' else np.clip(max_rank_per_matrix, a_min=None, a_max=num_vals)
+    vals_per_matrix = max_rank_per_matrix if num_vals=='auto' else np.clip(max_rank_per_matrix, a_min=None, a_max=np.abs(num_vals))
 
     # initialize stores
-    computed_evals =                 np.zeros((n_weights, n_points, n_gammas, vals_per_matrix.max())         , dtype=dtype)
-    if return_vecs: computed_evecs = np.zeros((n_weights, n_points, n_gammas, vals_per_matrix.max(), vec_len), dtype=dtype)
+    if partition: n_weights, n_points = 1, 1
+    computed_vals =     np.zeros((n_weights, n_points, n_gammas, vals_per_matrix.max())             , dtype=dtype)
+    if return_vecs: 
+        computed_lvecs = np.zeros((n_weights, n_points, n_gammas, vals_per_matrix.max(), m0.shape[0]), dtype=dtype)
+    if return_vecs and svd_mode: 
+        computed_rvecs = np.zeros((n_weights, n_points, n_gammas, vals_per_matrix.max(), m0.shape[1]), dtype=dtype)
 
     # calculate decomposition
-    for i, matrices_per_weight in itm(enumerate(matrices)):
-        for j, matrices_per_point in itp(enumerate(matrices_per_weight)):
-            for k, matrix_per_gamma in itg(enumerate(matrices_per_point)):
-                evals, evecs = calc_vals(matrix_per_gamma, num_vals=vals_per_matrix[i,j], return_vecs=return_vecs)
-                computed_evals[i, j, k, :len(evals)] = evals
-                if return_vecs: computed_evecs[i, j, k, :len(evecs)] = evecs
+    try:
+        for i, matrices_per_weight in itm(enumerate(matrices)):
+            for j, matrices_per_point in itp(enumerate(matrices_per_weight)):
+                for k, matrix_per_gamma in itg(enumerate(matrices_per_point)):
+                    res = calc_vals(matrix_per_gamma, num_vals=vals_per_matrix[i,j], return_vecs=return_vecs)
+                    vals = res[0] if return_vecs else res
+                    computed_vals[i, j, k, :len(vals)] = vals
+                    if return_vecs:
+                        lvecs = res[1]
+                        computed_lvecs[i, j, k, :len(lvecs)] = lvecs
+                        if svd_mode:
+                            rvecs = res[2]
+                            computed_rvecs[i, j, k, :len(rvecs)] = rvecs
+
+                save_func(computed_vals)
+
+    except KeyboardInterrupt:
+        print("Received Interrupt. Stop computation, return incomplete result.")
 
     if dtype==np.cfloat:
         # if none of the calculations returned imaginary parts, change dtype to real.
-        if not np.any(np.imag(computed_evals)):
-            computed_evals = np.real(computed_evals)
-        if return_vecs and not np.any(np.imag(computed_evecs)):
-            computed_evecs = np.real(computed_evecs)
+        if not np.any(np.imag(computed_vals)):
+            computed_vals = np.real(computed_vals)
+        if return_vecs and not np.any(np.imag(computed_lvecs)):
+            computed_lvecs = np.real(computed_lvecs)
+        if return_vecs and svd_mode and not np.any(np.imag(computed_rvecs)):
+            computed_rvecs = np.real(computed_rvecs)
 
-    return (computed_evals, computed_evecs if return_vecs else None)
+    save_func(computed_vals)
+
+    if return_vecs:
+        if svd_mode:
+            return computed_vals, computed_lvecs, computed_rvecs
+        return computed_vals, computed_lvecs
+    return computed_vals
 
 def calc_evals_batch(weights_list, points_list, gammas=np.linspace(0,1,201)[:-1], mode="forw recover activations", smart_gamma_func=None, output_layer_relevancies=None, return_matrices=False, num_vals_largest=None, return_evecs=False, abs_evals=False, svd_mode=False):
     """
@@ -439,226 +534,6 @@ def col_norms_for_matrices(comp_mats, ord=1):
                 col_norms[i_weight, i_point, i_gamma] = norm
 
     return col_norms
-
-
-def plot_vals_lineplot(vals, gammas=np.linspace(0,1,201)[:-1], 
-                mark_positive_slope=False, plot_only_non_zero=False, one_plot_per='weight',
-                num_vals_largest=None, num_vals_total=None,
-                ylabel="Singular values", title=None,
-                ylim=4, xlim=None,
-                yscale='linear', xscale='linear', sharey=False, xtick_mask=None,
-                figsize=None, show=True, 
-                green_line_at_x=None, tag_line=None, 
-                colormap='viridis'):
-    """
-    Plots the evolution of Eigenvalues with increasing gammas in a lineplot.
-    """
-
-    # reduce number of eval lines to show to first n.
-    if num_vals_largest:
-        vals = vals[:, :, :, :num_vals_largest]
-    assert not (num_vals_largest and num_vals_total)
-
-    n_ax_dict = {
-        'in total': (1, 1),
-        'weight': (1, vals.shape[0]),
-        'point': vals.shape[:2]
-    }
-    assert one_plot_per in ['point', 'weight', 'in total']
-    n_ax = n_ax_dict[one_plot_per]
-
-    # 
-    if type(xlim) == int:
-        x_lim_lower = {'linear':0, 'log': max(1e-3, gammas[0])*.9}[xscale]
-        xlim = [x_lim_lower, xlim]
-    elif type(xlim) == tuple:
-        xlim = list(xlim)
-    elif type(xlim) != list and xlim is not None:
-        print(f'Warn: Invalid xlim: {xlim}. Setting xlim to None.')
-        xlim = None
-    
-    if xlim:
-        mask = np.logical_and(gammas >= xlim[0], gammas <= xlim[1])
-        gammas = gammas[mask]
-        vals = vals[:, :, mask]
-        if xtick_mask: xtick_mask = xtick_mask[mask]
-
-    percentile_to_plot = None
-    if type(ylim) == str and ylim[0] == 'p': # we passed a percentile code like "p99" -> show at least 99 percentiles of every line
-        percentile_to_plot = float(ylim[1:])
-        ylim = None
-    elif type(ylim) == int:
-        y_lim_lower = {'linear':0, 'log': max(1e-3, vals.min())*.9}[yscale]
-        ylim = [y_lim_lower, ylim]
-    elif type(ylim) == tuple:
-        ylim = list(ylim)
-    elif type(ylim) != list and ylim is not None:
-        print('Warn: Invalid ylim: {ylim}. Setting ylim to None.')
-        ylim = None
-
-    if figsize is None: 
-        figsize = (20, 10) if n_ax==(1,1) else (5*n_ax[1], 3*n_ax[0])
-    fig, axs = plt.subplots(*n_ax, figsize=figsize, sharey=sharey)
-    axs, ax_i, ax = np.array(axs).flatten(), -1, None
-
-    if title is not None:
-        fig.suptitle(title)
-    else:
-        fig.suptitle(f'Evolution of {ylabel} with increasing $\gamma$' +
-                ('\nFat bar below indicates section of positive derivative' if mark_positive_slope else ''))
-
-    ### helper functions ###
-    def ax_init():
-        nonlocal axs, ax, ax_i
-        # iterate to next ax
-        ax_i += 1
-        ax = axs[ax_i]
-
-        # plt.figure(figsize=(20,10))
-        ax.set_xlabel('$\gamma$')
-        if i==0 or sharey==False: 
-            ax.set_ylabel(ylabel)
-
-        if green_line_at_x is not None: ax.axvline(green_line_at_x, color="green")
-
-        ax.set_xscale(xscale)
-        ax.set_yscale(yscale)
-        
-    def ax_show():
-        nonlocal ax, xlim, ylim
-
-        if tag_line is not None:
-            ax.legend(loc='upper right')
-
-        # set ylim
-        ylim_u = ylim[1] * 1.01 + .1
-        ylim_l = ylim[0] / 1.01 - .1 if yscale=='linear' else ylim[0] / 1.1
-        ax.set_ylim((ylim_l, ylim_u))
-        
-        if percentile_to_plot: ylim = None
-
-        if xlim is None: return
-    
-        # set xlim
-        xlim_u = xlim[1] * 1.01 + .1
-        xlim_l = xlim[0] / 1.01 - .1 if xscale=='linear' else xlim[0] / 1.1
-        ax.set_xlim((xlim_l, xlim_u))
-
-    ### preemptive checks ###
-    assert np.all([[len(line) == len(gammas) for line in sub_list] for sub_list in vals]), "Shape doesn't match."
-
-    if one_plot_per=='in total': ax_init()
-
-    for i, per_points in enumerate(vals): # iterate matrices
-        if one_plot_per=='weight': ax_init()
-
-        for j, evals in enumerate(per_points): # iterate points
-            if one_plot_per=='point': ax_init()
-            if percentile_to_plot:
-                pos_vals = evals[evals > 0] if (plot_only_non_zero or yscale=='log' or np.all(vals >= 0)) else evals
-                pos_vals = pos_vals[np.logical_not(np.isnan(pos_vals))]
-                
-                # calculate lower and upper xlim, update if they are wider.
-                l = np.percentile(pos_vals,                    (100-percentile_to_plot)/2)
-                u = np.percentile(pos_vals, percentile_to_plot+(100-percentile_to_plot)/2)
-                ylim = [l, u] if ylim is None else [min(ylim[0], l), max(ylim[1], u)]
-
-            # reset color cycle
-            ax.set_prop_cycle(None)
-            # plot for this point
-            if plot_only_non_zero:
-                mask = np.any(np.abs(evals) > 1e-5, axis=0)
-                evals = evals[:, mask]
-                # print(f"W: {i}, p: {j}. {1-mask.mean():.0%} of lines are constantly zero and don't get plotted. Remaining:", mask.sum())
-                ax.title.set_text(f"({i},{j}) {mask.sum()}/{np.prod(mask.shape)} lines are non-zero.")
-            
-            Y = evals  # + np.random.normal(0, .005, size=evals.shape[1])[None, :] # add some random noise, such that lines don't overlap.
-            all_vals_nan = np.any((Y != 0)*1 - np.isnan(Y), axis=0)
-            Y = Y[:, all_vals_nan]
-
-            if num_vals_total:
-                indices = np.linspace(0, Y.shape[1]-1, num_vals_total).round().astype(int)
-                indices = np.unique(indices)
-                # print(f"Reducing num of lines from: {Y.shape[1]} to {len(indices)}")
-                Y = Y[:, indices]
-
-            labels = [f'Exp. {i+1}, Point {j+1}, Sval {k+1}' for k in range(Y.shape[1])]
-            labels = [f'Singular value {k+1}' for k in range(Y.shape[1])] # <- prettier, for Proposal plot
-            if tag_line is not None:
-                assert len(tag_line) == len(labels), "Invalid labels per line passed."
-                labels = tag_line
-            
-            # If gammas are numerical, use them to determine x position of lines. If they are strings, plot evals in equal spacing, and label them with the 'gammas'
-            if np.any([type(g) is str for g in gammas]):
-                xtick = np.arange(len(gammas))
-                if xtick_mask is None: xtick_mask = np.full_like(xtick, True, dtype=bool)
-
-                ax.set_xticks(xtick[xtick_mask])
-                lbls = gammas
-                lbls = [pretty_num(lbl) for lbl in lbls]
-                lbls = np.array(lbls)[xtick_mask]
-                ax.set_xticklabels(lbls)
-            else:
-                xtick=gammas
-
-            if colormap is not None:
-                # count number of lines that have non-zero, non-nan elements in them
-                num_colors = np.sum(np.any((Y != 0)*1 - np.isnan(Y), axis=0))
-                ax.set_prop_cycle(mpl.cycler('color', [mpl.colormaps[colormap](k) for k in np.linspace(0, 1, num_colors)]))  
-            ax.plot(xtick, Y, label=labels)
-
-
-            if mark_positive_slope: # plot a scatter dot if the series values is increasing
-                # calc sign of derivative
-                is_positive = np.diff(evals, axis=0) > 0
-                # reset color cycle
-                ax.set_prop_cycle(None)
-
-                for k, is_pos, label in zip(range(100), is_positive.T, [f'Point {j+1}, EV {k+1} (Increasing segment)' for k in range(evals.shape[1])]):
-                    x = gammas[:-1][is_pos]
-                    y = np.full_like(x, -.2 -.05*k - .15*j)
-                    ax.scatter(x,y, s=5)
-
-            if one_plot_per=='point': ax_show()
-        if one_plot_per=='weight': ax_show()
-    if one_plot_per=='in total': ax_show()
-
-    plt.subplots_adjust(hspace=0.3)
-    if show:
-        plt.show()
-    else:
-        return fig, axs
-
-
-def plot_multiplicative_change(vals, gammas, hmean=False, normalize=False, **passed_kwargs):
-    kwargs = {
-        "ylabel": "Multiplicative change",
-        "title": "Multiplicative change per Singular value. Shows which Singular values decrease fastest relative to their size. Blue are biggest Svals. Red smallest.",
-        "yscale": "log",
-        "ylim": 'p100',
-        "sharey": False,
-        "colormap": "seismic",
-    }
-    for k,v in passed_kwargs.items(): kwargs[k] = v
-        
-    if normalize:
-        vals = vals - vals[:, :, -1:, :]
-        
-    with HiddenPrints():
-        change = vals / vals[:, :, :1, :] # potential divide by 0
-    
-    if normalize and kwargs['yscale']=='log': change += 0.01
-    
-    # calculate harmonic mean over...
-    if hmean=='points': 
-        if normalize: 
-            change[:, :, -1] = 1 # the entries for gamma=inf are normalized to 0. The hmean can not be calculated for 0 entries.
-            change = np.clip(change, a_min=1e-3, a_max=None)
-        change = stats.hmean(change, axis=1, keepdims=True, nan_policy='omit')
-        if normalize: 
-            change[:, :, -1] = 0 # We thus adopt the policy hmean(..., 0, ...) = 0.
-    
-    return plot_vals_lineplot(change, gammas, **kwargs)
 
 def eval_peak_distribution_plot(computed_evals, gammas, weights_lbls=None):
     """

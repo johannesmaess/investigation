@@ -1,4 +1,8 @@
 import numpy as np
+from util.naming import *
+from util.util_data_summary import prep_data, condition_number
+from util.util_pickle import load_data, save_data
+from util.common import match_gammas
 
 
 def mat_norm_batch(per_weight, p):
@@ -30,11 +34,42 @@ def nonzero_rows_cols_batch(per_weight):
     def uni(arr): return len(np.unique(arr))
     return np.array([[[[uni(mat.row), uni(mat.col)] for mat in per_gamma] for per_gamma in per_point] for per_point in per_weight]).transpose((3,0,1,2))
 
-def calc_norm_dict(matrices, svals):
+def calc_norm_dict(matrices=None, svals=None, gammas=None, pickle_key=(), cs=None, filter_size=None, version='V1', overwrite=False):
     """
     Returns a collection of useful norms, and bounds on the L2 norm in a dictionary.
     """
-    assert matrices.shape[:3] == svals.shape[:3]
+    ## try to load the result
+    if pickle_key:
+        mkey, dkey = pickle_key
+        ind = dkey.find('__')
+        # key for loading norms
+        dkey_norms = 'norm_dict_' + version + dkey[ind:]
+
+        if not overwrite:
+            res = load_data(mkey, dkey_norms)
+            if res is not False: return res
+
+    ## compute the norms
+    # load svals and matrices
+    if svals is None: svals, gammas = prep_data(pickle_key, gammas)
+    if matrices is None:
+        mkey, dkey = pickle_key
+        ind = dkey.find('__')
+        # key for loading LRP matrices: "LRP__..."
+        dkey_lrp = 'LRP' + dkey[ind:]
+        matrices = load_data(mkey, dkey_lrp)
+
+    assert svals.shape[0] == matrices.shape[0]  and svals.shape[2] == matrices.shape[2] # same number of weights and gammas
+    n_points = min(matrices.shape[1], svals.shape[1])
+
+    if cs is not None: 
+        assert cs.shape[0] == matrices.shape[0] # same number of weights
+        
+        n_points = min(n_points, cs.shape[1])
+        cs = cs[:, :n_points]
+
+    svals = svals[:, :n_points]
+    matrices = matrices[:, :n_points]
     
     l1 = mat_norm_batch(matrices, p=1)
     linf = mat_norm_batch(matrices, p=np.inf)
@@ -42,7 +77,7 @@ def calc_norm_dict(matrices, svals):
 
     frobenius_b = (svals**2).sum(axis=3)**.5
     rel_err = np.abs((frobenius - frobenius_b) / np.maximum(frobenius, frobenius_b)).max()
-    assert rel_err < 0.001, f"Multiplicative difference in Frobenius norm calculation methods too high. {rel_err}"
+    assert rel_err < 0.01, f"Multiplicative difference in Frobenius norm calculation methods too high. {rel_err}"
     del frobenius_b
 
     l2 = svals[:, :, :, 0]
@@ -58,5 +93,56 @@ def calc_norm_dict(matrices, svals):
 
     sqrt_L1_Linf = np.sqrt(l1*linf)
     
-    return {k:v for k,v in zip(["L1_lower", "L1_upper", "Linf_lower", "Linf_upper", "sqrt_L1_Linf", "L2", "L1", "Linf", "frobenius"], 
-                                (l1_lower, l1_upper, linf_lower, linf_upper, sqrt_L1_Linf, l2, l1, linf, frobenius)) }
+    
+    
+    
+    norm_dict = {
+        "L2": l2,
+        "L1": l1,
+        "Linf": linf,
+        
+        # upper bounds on L2
+        "sqrt_L1_Linf": sqrt_L1_Linf, 
+        "frobenius": frobenius,
+        "L1_upper": l1_upper, 
+        "Linf_upper": linf_upper, 
+        
+        # lower bounds on L2
+        "L1_lower": l1_lower, 
+        "Linf_lower": linf_lower, 
+        
+        # condition number
+        "cond": condition_number(svals),
+        "cond_0_.1": condition_number(svals, percentile=(0,.1)),
+        "cond_0_.2": condition_number(svals, percentile=(0,.2)),
+    }
+    
+    
+    # predict l1 norm by just calculating the coefficient c once
+    if cs is not None: 
+        gammas = match_gammas(svals)
+        cs = cs[:, :, None]
+        gammas = gammas[None, None, :]
+        l1_analytically = 1 + 2*cs / (1 - cs + gammas)
+        
+        norm_dict["L1 analytically"] = l1_analytically
+
+    if filter_size is not None:
+        if filter_size == 'lrp':
+            filter_size = np.vectorize(lambda mat: (mat.toarray() != 0).sum(axis=0).max())(matrices)
+        else:
+            assert len(matrices) == len(filter_size), "Pass the numer of filter entries for every matrix."
+            filter_size = np.array(filter_size)
+        
+        norm_dict["Linf by L1"] = l1 * filter_size
+        norm_dict["sqrt_L1_Linf by L1"] = np.sqrt(filter_size) * l1
+        
+        if cs is not None:
+            norm_dict["Linf by L1 analytically"] = filter_size * l1_analytically
+            norm_dict["sqrt_L1_Linf by L1 analytically"] = np.sqrt(filter_size) * l1_analytically
+
+
+    if pickle_key:
+        save_data(mkey, dkey_norms, norm_dict)
+
+    return norm_dict

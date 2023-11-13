@@ -1,0 +1,45 @@
+Traceback (most recent call last):
+  File "/opt/ge/default/spool/node47/job_scripts/992941", line 114, in <module>
+    calc_vals_batch(pickle_key=pickle_key, overwrite=True)#, partition=partition)
+  File "/home/johannes/Masterarbeit/util/util_gamma_rule.py", line 422, in calc_vals_batch
+    assert partition is None, f"Pass integer or tuple as partition. {partition}"
+AssertionError: Pass integer or tuple as partition. False
+Traceback (most recent call last):
+  File "/opt/ge/default/spool/node43/job_scripts/992941", line 114, in <module>
+    calc_vals_batch(pickle_key=pickle_key, overwrite=True)#, partition=partition)
+  File "/home/johannes/Masterarbeit/util/util_gamma_rule.py", line 422, in calc_vals_batch
+    assert partition is None, f"Pass integer or tuple as partition. {partition}"
+AssertionError: Pass integer or tuple as partition. False
+Traceback (most recent call last):
+  File "/opt/ge/default/spool/node45/job_scripts/992941", line 114, in <module>
+    calc_vals_batch(pickle_key=pickle_key, overwrite=True)#, partition=partition)
+  File "/home/johannes/Masterarbeit/util/util_gamma_rule.py", line 422, in calc_vals_batch
+    assert partition is None, f"Pass integer or tuple as partition. {partition}"
+AssertionError: Pass integer or tuple as partition. False
+Traceback (most recent call last):
+  File "/opt/ge/default/spool/node54/job_scripts/992941", line 114, in <module>
+    calc_vals_batch(pickle_key=pickle_key, overwrite=True)#, partition=partition)
+  File "/home/johannes/Masterarbeit/util/util_gamma_rule.py", line 422, in calc_vals_batch
+    assert partition is None, f"Pass integer or tuple as partition. {partition}"
+AssertionError: Pass integer or tuple as partition. False
+Traceback (most recent call last):
+  File "/opt/ge/default/spool/node28/job_scripts/992941", line 114, in <module>
+    calc_vals_batch(pickle_key=pickle_key, overwrite=True)#, partition=partition)
+  File "/home/johannes/Masterarbeit/util/util_gamma_rule.py", line 422, in calc_vals_batch
+    assert partition is None, f"Pass integer or tuple as partition. {partition}"
+AssertionError: Pass integer or tuple as partition. False
+0it [00:00, ?it/s]0it [00:00, ?it/s]0it [00:00, ?it/s]0it [00:00, ?it/s]0it [00:00, ?it/s]1it [01:23, 83.99s/it]2it [02:32, 74.76s/it]3it [03:51, 76.63s/it]4it [05:14, 79.38s/it]5it [06:40, 81.62s/it]5it [06:40, 80.07s/it]
+0it [00:00, ?it/s]1it [09:43, 583.74s/it]2it [18:28, 549.11s/it]3it [27:40, 550.52s/it]1it [39:17, 2357.63s/it]1it [39:27, 2367.77s/it]1it [41:25, 2485.43s/it]4it [37:09, 557.60s/it]1it [45:28, 2728.64s/it]5it [46:38, 561.67s/it]5it [46:38, 559.63s/it]
+0it [00:00, ?it/s]1it [00:02,  2.35s/it]2it [00:03,  1.50s/it]3it [00:03,  1.12it/s]4it [00:03,  1.68it/s]5it [00:04,  1.32it/s]5it [00:04,  1.08it/s]
+2it [1:33:10, 2870.58s/it]2it [1:33:27, 2882.24s/it]2it [1:37:53, 3016.48s/it]2it [1:47:23, 3308.95s/it]3it [2:14:58, 2705.30s/it]3it [2:15:36, 2721.30s/it]3it [2:20:35, 2809.02s/it]3it [2:34:50, 3097.79s/it]4it [2:54:59, 2585.12s/it]4it [2:55:58, 2602.97s/it]4it [3:01:15, 2663.20s/it]4it [3:15:09, 2830.06s/it]5it [3:30:02, 2411.14s/it]5it [3:30:02, 2520.50s/it]
+0it [00:00, ?it/s]5it [3:31:27, 2432.13s/it]5it [3:31:27, 2537.53s/it]
+0it [00:00, ?it/s]5it [3:37:21, 2483.81s/it]5it [3:37:21, 2608.23s/it]
+0it [00:00, ?it/s]5it [3:50:18, 2569.79s/it]5it [3:50:18, 2763.65s/it]
+0it [00:00, ?it/s]1it [31:04, 1864.29s/it]1it [31:20, 1880.53s/it]1it [32:28, 1948.34s/it]1it [30:15, 1815.44s/it]2it [1:10:56, 2175.01s/it]2it [1:11:23, 2187.96s/it]2it [1:14:23, 2281.50s/it]2it [1:14:14, 2299.87s/it]3it [1:43:56, 2085.86s/it]3it [1:44:29, 2095.70s/it]3it [1:48:18, 2169.33s/it]3it [1:49:55, 2227.23s/it]4it [2:16:03, 2023.06s/it]4it [2:16:18, 2021.94s/it]4it [2:22:00, 2111.15s/it]5it [2:43:47, 1893.50s/it]5it [2:43:47, 1965.43s/it]
+0it [00:00, ?it/s]1it [00:03,  3.29s/it]2it [00:33, 19.24s/it]3it [00:38, 12.83s/it]4it [00:43,  9.51s/it]5it [00:44,  6.35s/it]5it [00:44,  8.81s/it]
+5it [2:43:21, 1878.09s/it]5it [2:43:21, 1960.30s/it]
+0it [00:00, ?it/s]1it [00:03,  3.13s/it]4it [2:24:49, 2174.70s/it]2it [00:32, 18.77s/it]3it [00:37, 12.52s/it]4it [00:42,  9.25s/it]5it [00:42,  6.17s/it]5it [00:42,  8.58s/it]
+5it [2:50:31, 1966.71s/it]5it [2:50:31, 2046.30s/it]
+0it [00:00, ?it/s]1it [00:02,  2.18s/it]2it [00:25, 14.82s/it]3it [00:29,  9.72s/it]4it [00:32,  7.04s/it]5it [00:32,  4.67s/it]5it [00:32,  6.58s/it]
+5it [2:54:13, 2026.50s/it]5it [2:54:13, 2090.62s/it]
+0it [00:00, ?it/s]1it [00:04,  4.71s/it]2it [00:44, 25.15s/it]3it [00:51, 17.09s/it]4it [00:57, 12.82s/it]5it [00:59,  8.59s/it]5it [00:59, 11.81s/it]
