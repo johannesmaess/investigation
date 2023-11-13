@@ -359,8 +359,8 @@ def calc_vals_batch(matrices, num_vals='auto', return_vecs=False, svd_mode=True,
     if tqdm_for=='point':  itp = tqdm
     if tqdm_for=='gamma':  itg = tqdm
 
-    n_weights, n_points, n_gammas = matrices.shape[:3]
-    assert len(matrices[0, 0, 0].shape) == 2, "'matrices' should contain 2D arrays (np.ndarray or scipy.coo_array), nested in a 2D structure"
+    n_weights, n_points, n_gammas = len(matrices), len(matrices[0]), len(matrices[0][0])
+    assert len(matrices[0][0][0].shape) == 2, "'matrices' should contain 2D arrays (np.ndarray or scipy.coo_array), nested in a 2D structure"
 
     if abs_vals or svd_mode: dtype=np.float
     else:                    dtype=np.cfloat
