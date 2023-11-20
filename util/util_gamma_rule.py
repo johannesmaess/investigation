@@ -270,6 +270,15 @@ def back_matrix(W, curr, gamma, smart_gamma_func=None, delete_unactivated_subnet
     R_i_given_j = prune_coo_array(R_i_given_j)
 
     return R_i_given_j
+    
+def prune_coo_array(mat, atol=0):
+    """
+    Remove 0 entries from coo_array.
+    """
+    if not isinstance(mat, coo_array): return mat
+
+    mask = (np.abs(mat.data) > atol)
+    return coo_array((mat.data[mask], (mat.row[mask], mat.col[mask])), shape=mat.shape)
 
 def back_joint_matrix(W, curr, gamma, R_j_backwards, **kwargs):
     """
@@ -656,12 +665,3 @@ def smart_gamma_wo_sign_flips(W, curr):
     mask[np.logical_and(0 < normal_res, normal_res < positive_res)] = 1
 
     return mask
-
-def prune_coo_array(mat, atol=0):
-    """
-    Remove 0 entries from coo_array.
-    """
-    if not isinstance(mat, coo_array): return mat
-
-    mask = (np.abs(mat.data) > atol)
-    return coo_array((mat.data[mask], (mat.row[mask], mat.col[mask])), shape=mat.shape)

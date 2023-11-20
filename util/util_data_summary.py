@@ -14,7 +14,7 @@ from scipy import stats
 
 # differnetiation and smoothing methods
 from scipy.spatial.distance import cdist
-from statsmodels.nonparametric.smoothers_lowess import lowess
+# from statsmodels.nonparametric.smoothers_lowess import lowess
 from scipy.interpolate import UnivariateSpline
 from scipy.signal import savgol_filter
 
@@ -250,7 +250,7 @@ def prep_data(vals, gammas=None
                     if approx_method=='spline':  vals_new = UnivariateSpline(gammas_old, vals_old, k=approx_power)(gammas_new)
                     if approx_method=='loess':
                         # Perform LOESS smoothing on the gammas and vals for this entry
-                        smooth_vals = lowess(vals_old, gammas_old, frac=approx_power)
+                        smooth_vals = lowess(vals_old, gammas_old, frac=approx_power) # to use: uncomment import above
 
                         # Interpolate the smoothed vals at the denser gamma values
                         vals_new = np.interp(gammas_new, smooth_vals[:, 0], smooth_vals[:, 1])
@@ -593,6 +593,7 @@ def plot_sval_func(vals, gammas=None, dice=(), alpha=.75,
             pvals=pvals[:, np.any(pvals>0, axis=0)]     # pvals contain:              per point, per gamma, k<n singular values
             # print(pvals.shape)            
             func_vals, func_gammas = sval_func(pvals, gammas)
+            # func_vals /= func_vals[0] # this is a hacked "normalisation", don't enable it
 
             if minima==True:
                 gamma_idx = func_vals.argmin()
@@ -655,10 +656,10 @@ def condition_number_for_point(pvals, gammas, percentile=0, derivative_kw={}):
     return cond, gammas
 
 def condition_number(vals, percentile=0):
-    vals, _ = prep_data(vals)
-    return np.stack([np.stack([condition_number_for_point(pvals[:, np.any(pvals>0, axis=0)], percentile) for pvals in wvals]) for wvals in vals])
+    vals, _ = prep_data(vals, gammas=np.arange(vals.shape[2]))
+    return np.stack([np.stack([condition_number_for_point(pvals[:, np.any(pvals>0, axis=0)], percentile)[0] for pvals in wvals]) for wvals in vals])
 
-def plot_condition_number(*args, 
+def plot_condition_number(*args,
                           percentile=0, mode='lines minima dist', 
                           ticks=None, xlim=(1e-4, 1e3), ylim=(1, 1e5), 
                           kde_bw=.6, alpha=1.0,
@@ -700,8 +701,8 @@ def plot_condition_number(*args,
         axs = fig.axes
 
         # labeling
-        if ticks is None: ticks=ax.get_xticks()
         for ax in axs:
+            if ticks is None: ticks=ax.get_xticks()
             ax.set_xlabel('$\gamma$')
             ax.set_ylabel('')
             ax.set_ylim(ylim)
