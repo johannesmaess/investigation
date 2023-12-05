@@ -34,6 +34,7 @@ for d in ['mae', 'mse', 'corr']:
 d3_tag = 'cb1-8-8-8_cb2-16-16-16_seed-0'
 
 d3_after_conv_layer = [3, 5, 8, 10, 12, 16]
+d3_before_all_conv = np.array([1] + d3_after_conv_layer) - 1
 
 ## V5 models
 s4f3_tag = 'Fs-3-3-3-3_seed-0'

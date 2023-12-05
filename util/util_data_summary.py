@@ -40,7 +40,7 @@ def heatshow(data, print_data=False, lim=None, ax=plt):
     return ax.imshow(data, vmin=-lim, vmax=lim, cmap="RdYlGn")
 
 def pretty_num(num):
-    if num=='inf': return num
+    if type(num) is str: return num
     if 0.01 < num <= 100: return f"{num:.3f}".rstrip('0').rstrip('.')                                       # floating
     return f"{num:.1e}".replace('.0e', 'e').replace('e+00', '').replace('e+0', 'e+').replace('e-0', 'e-')   # scientific
 
@@ -330,6 +330,7 @@ def distribution_plot(vals, gammas=None, dice=(),
                       showextrema=True, showmedians=True, # violin plot args
                       axs=None, # provide (the right amount of) axs to draw on
                       ticks=None,
+                      xscale='log',
                       **hist_kwargs):
     """
     Plots the distribution of Eigenvalues/Singularvalues 
@@ -345,6 +346,10 @@ def distribution_plot(vals, gammas=None, dice=(),
     vals, gammas = prep_data(vals, gammas, norm_g0, norm_s1, dice=dice)
     # if norm_s1:  ylabel='$\\frac{ \sigma_i(\gamma) }{ \sigma_1(\gamma) }$'
     # if norm_g0:  ylabel='$\\frac{ \sigma_i(\gamma) }{ \sigma_i(0) }$'
+
+    if xscale == 'log':         xscale_func = np.log
+    elif xscale=='linear':      xscale_func = lambda x: x
+    elif xscale=='arange':      xscale_func = lambda x: np.arange(len(x))
 
     lbl_point=None
     sharey_auto='row'
@@ -395,22 +400,21 @@ def distribution_plot(vals, gammas=None, dice=(),
                         mask = gammas > 0
                         x = gammas[mask]
                         y = vals_for_point[mask].T
-                        ax.set_xticks(np.log(x), [pretty_num(g) for g in x])
+                        ax.set_xticks(xscale_func(x), [pretty_num(g) for g in x])
                             
                     else: # plot gamma=0 in the position of a small value
                         x = gammas.copy()
                         if x[0] == 0:
                             x[0] = x[1] / 10
                         y = vals_for_point.T
-                        ax.set_xticks(np.log(x), [pretty_num(g) for g in gammas])
+                        ax.set_xticks(xscale_func(x), [pretty_num(g) for g in gammas])
                             
-                        
-                    if mode=='violin': ax.violinplot(positions=np.log(x), dataset=y, \
+                    if mode=='violin': ax.violinplot(positions=xscale_func(x), dataset=y, \
                                                      showextrema=showextrema, showmedians=showmedians)
-                    elif mode=='box':     ax.boxplot(positions=np.log(x),       x=y, showfliers= showextrema)
+                    elif mode=='box':     ax.boxplot(positions=xscale_func(x),       x=y, showfliers= showextrema)
 
                     if ticks is not None:
-                        ax.set_xticks(np.log(ticks))
+                        ax.set_xticks(xscale_func(ticks))
                         ax.set_xticklabels([pretty_num(t) for t in ticks])
 
                 ax.set_xlabel("$\gamma$")
