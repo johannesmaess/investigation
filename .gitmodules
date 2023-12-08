@@ -4,3 +4,9 @@
 [submodule "explanations_can_be_manipulated"]
 	path = explanations_can_be_manipulated
 	url = https://github.com/johannesmaess/explanations_can_be_manipulated.git
+[submodule "ma-thesis"]
+	path = ma-thesis
+	url = git@github.com:johannesmaess/ma-thesis.git
+[submodule "xai-svd-paper-cai"]
+	path = xai-svd-paper-cai
+	url = git@github.com:johannesmaess/xai-svd-paper-cai.git
