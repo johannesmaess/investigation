@@ -14,4 +14,17 @@ pickle/d3_copy*
 
 # temporary
 pickle/d3/llrp__*
+
+## some patterns that lead to unnecessary large files containing intermediate results
 mats__*
+svals__individual_layer__gammas80.pickle
+svals__individual_layer__gammas400.pickle
+Rel0__m0_to_0__individual_gamma__gammas80.pickle
+Rels__15_to_0__testset100__shap__background_size-100__batch_size-10.pickle
+Rel0__m0_to_0__cascading_gamma__gammas80.pickle
+# compute relevances towards every intermediate neuron:
+Rels__*_to_t__*
+# run on entire testset:
+*__testset__* 
+# stores scores for every step of the PixFlip process:
+PixFlipScores__*
