@@ -53,3 +53,16 @@ s4_after_conv_layer = [3, 5, 7]
 s6_after_conv_layer = [3, 5, 7, 9, 11]
 s8_after_conv_layer = [3, 5, 7, 9, 11, 13, 15]
 
+unicode_bars = [
+    "",    # Empty bar
+    "▁",  # Lower one eighth block
+    "▂",  # Lower one quarter block
+    "▃",  # Lower three eighths block
+    "▄",  # Lower half block
+    "▅",  # Lower five eighths block
+    "▆",  # Lower three quarters block
+    "▇",  # Lower seven eighths block
+    "█",  # Full block
+    "X"   # 'Full bar'
+]
+

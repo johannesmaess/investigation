@@ -9,7 +9,7 @@ from util.naming import *
 from util.util_pickle import load_data, save_data
 
 import torch
-from scipy.sparse import coo_array
+from scipy.sparse import coo_array, coo_matrix
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
@@ -327,14 +327,17 @@ def calc_vals(M, num_vals, return_vecs=False, svd_mode=True, abs_vals=False):
     """
     For a given matrix, calculate its eigen or singular-value decomposition and return it sorted by the values magnitudes.
     """
-    if type(M) is coo_array:
+    n_rows, n_cols = M.shape
+    
+    if isinstance(M, coo_array) or isinstance(M, coo_matrix):
+        
         if num_vals==min(M.shape): 
             # the svds solver wants num_vals > min(M.shape).
             # pad coo_array, with one imagined columns full of zero.
             larger_shape = np.maximum(M.shape, min(M.shape)+1)
             M = coo_array((M.data, (M.row, M.col)), shape=larger_shape)
 
-        if not svd_mode:     vals, vecs    = eigs(M, k=num_vals, which="LM")
+        if not svd_mode:     vals, lvecs   = eigs(M, k=num_vals, which="LM")
         else:            
             # computation of smallest svals by passing negative k:
             # issue with argpack: doesnt converge sometimes
@@ -343,10 +346,11 @@ def calc_vals(M, num_vals, return_vecs=False, svd_mode=True, abs_vals=False):
             else:            which="LM"
             if return_vecs: lvecs, vals, rvecs = svds(M, k=num_vals, which=which, return_singular_vectors=True)
             else:                  vals        = svds(M, k=num_vals, which=which, return_singular_vectors=False)
+            
+        
     elif type(M) is np.ndarray:
         if np.any(np.isnan(M)):
-            print(M)
-            return
+            raise Exception(f'Matrix has nan elements: {M}')
         if not svd_mode: vals, lvecs        = eig(M)
         else:            lvecs, vals, rvecs = svd(M, full_matrices=False)
     else:
@@ -357,17 +361,19 @@ def calc_vals(M, num_vals, return_vecs=False, svd_mode=True, abs_vals=False):
 
     # determine order by magnitude, for the num_vals largest vals
     order = np.argsort(-np.abs(vals), axis=0)[:num_vals]
-
+        
     # return sorted vals and vecs
+    #  and shorted the vectors if we previously padded the matrix:
     vals = vals[order]
+    vals = vals[:min(n_cols, n_rows)]
     if return_vecs:
-        lvecs = np.array(lvecs).T[order]
+        lvecs = np.array(lvecs).T[order, :n_rows]
         if svd_mode:
-            rvecs = np.array(rvecs)[order]
+            rvecs = np.array(rvecs)[order, :n_cols]
             return vals, lvecs, rvecs
         return vals, lvecs
     return vals
-
+    
 
 def calc_vals_batch(matrices=None, num_vals='auto', return_vecs=False, svd_mode=True, abs_vals=False, tqdm_for='point', pickle_key=None, overwrite=False, partition=None, matrices_shape=None):
     """
@@ -440,7 +446,7 @@ def calc_vals_batch(matrices=None, num_vals='auto', return_vecs=False, svd_mode=
     # print('type(matrices):', type(matrices))
     n_weights, n_points, n_gammas = len(matrices), len(matrices[0]), len(matrices[0][0])
     m0 = matrices[0][0][0]
-    assert len(m0.shape) == 2, "'matrices' should contain 2D arrays (np.ndarray or scipy.coo_array), nested in a 3D structure"
+    assert len(m0.shape) == 2, f"'matrices' should contain 2D arrays (np.ndarray or scipy.coo_array), nested in a 3D structure.\nGot: ({n_weights}, {n_points}, {n_gammas}, {m0.shape})"
 
     if abs_vals or svd_mode: dtype=np.float
     else:                    dtype=np.cfloat
@@ -458,7 +464,7 @@ def calc_vals_batch(matrices=None, num_vals='auto', return_vecs=False, svd_mode=
     for i, matrices_per_weight in enumerate(matrices):
         for j, matrices_per_point in enumerate(matrices_per_weight):
             W = matrices_per_point[0]
-            if isinstance(W, coo_array):
+            if isinstance(W, coo_array) or isinstance(W, coo_matrix):
                 max_rank_per_matrix[i,j] = min([len(np.unique(W.row)), len(np.unique(W.col))])
             else:
                 max_rank_per_matrix[i,j] = min([np.sum(np.any(W, axis=0)), np.sum(np.any(W, axis=1))])

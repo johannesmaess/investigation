@@ -19,8 +19,13 @@ def save_data(model_tag, data_tag, data, partition=None):
     path = os.path.join(path, f'{data_tag}.pickle')
     with open(path, 'wb') as handle:
         pickle.dump(data, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        
+    print('Saved:', path)
 
-def load_data(model_tag, data_tag, partition=None, partitioned=False):
+def load_data(model_tag, data_tag, partition=None, partitioned=False, verbose=True, warn=True):
+    if verbose:
+        print("Attempt loading:", model_tag, data_tag)
+        # assert data_tag != 'svals__m0_to_1__cascading_gamma__gammas40'
     if partitioned:
         path_regex = os.path.join(PICKLE_PATH, model_tag, f'{data_tag}__partition*')    
         matches = sorted(list(glob.glob(path_regex)))
@@ -80,6 +85,7 @@ def load_data(model_tag, data_tag, partition=None, partitioned=False):
     
     path = os.path.join(PICKLE_PATH, model_tag, f'{data_tag}.pickle')
     if not os.path.exists(path):
+        if warn: print('Missing file:', path)
         return False
     with open(path, 'rb') as handle:
         data_loaded = pickle.load(handle)

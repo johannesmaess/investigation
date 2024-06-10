@@ -10,6 +10,7 @@ from math import ceil, floor
 from util.naming import *
 from util.common import *
 from functools import partial
+import functools 
 from scipy import stats
 
 # differnetiation and smoothing methods
@@ -40,7 +41,7 @@ def heatshow(data, print_data=False, lim=None, ax=plt):
     return ax.imshow(data, vmin=-lim, vmax=lim, cmap="RdYlGn")
 
 def pretty_num(num):
-    if type(num) is str: return num
+    if isinstance(num, str) or isinstance(num, np.str_): return num
     if 0.01 < num <= 100: return f"{num:.3f}".rstrip('0').rstrip('.')                                       # floating
     return f"{num:.1e}".replace('.0e', 'e').replace('e+00', '').replace('e+0', 'e+').replace('e-0', 'e-')   # scientific
 
@@ -417,6 +418,8 @@ def distribution_plot(vals, gammas=None, dice=(),
                         ax.set_xticks(xscale_func(ticks))
                         ax.set_xticklabels([pretty_num(t) for t in ticks])
 
+                # if ylim is not None: ax.set_ylim(ylim)
+
                 ax.set_xlabel("$\gamma$")
                 ax.set_yscale('log')
             else: raise Exception(f"Invalid mode: {mode}")
@@ -659,8 +662,9 @@ def condition_number_for_point(pvals, gammas, percentile=0, derivative_kw={}):
 
     return cond, gammas
 
-def condition_number(vals, percentile=0):
-    vals, _ = prep_data(vals, gammas=np.arange(vals.shape[2]))
+def condition_number(vals, gammas='arange', percentile=0):
+    if gammas=='arange': gammas = np.arange(vals.shape[2])
+    vals, _ = prep_data(vals, gammas=gammas)
     return np.stack([np.stack([condition_number_for_point(pvals[:, np.any(pvals>0, axis=0)], percentile)[0] for pvals in wvals]) for wvals in vals])
 
 def plot_condition_number(*args,
@@ -668,6 +672,7 @@ def plot_condition_number(*args,
                           ticks=None, xlim=(1e-4, 1e3), ylim=(1, 1e5), 
                           kde_bw=.6, alpha=1.0,
                           cond_derivative=True,
+                          fig_axs=None,
                           **kwargs):
     upper_bound=1024.0
     
@@ -701,8 +706,11 @@ def plot_condition_number(*args,
         plt.clf() # clear
 
         plot_func(minima=0)
-        fig = plt.gcf()
-        axs = fig.axes
+        if fig_axs is not None: 
+            fig, axs = fig_axs
+        else:
+            fig = plt.gcf()
+            axs = fig.axes
 
         # labeling
         for ax in axs:
@@ -718,7 +726,7 @@ def plot_condition_number(*args,
         if 'minima' in mode:
             for i, (g, mini, ax) in enumerate(zip(gs, minis, axs)):
                 colors = [mpl.colormaps['tab20'](k) for k in np.linspace(0, 1, len(mini))]
-                ax.scatter(x=g, y=mini, marker='X', s=80, zorder=2, color=colors, alpha=alpha)
+                ax.scatter(x=g, y=mini, marker='X', s=80, zorder=5, color=colors, alpha=alpha)
                 # ax.violinplot(vert=False, dataset=g, showextrema=False, showmedians=False, widths=1)
                 # ax.boxplot(vert=False, x=g, showfliers=False, showcaps=False)
 
@@ -800,32 +808,42 @@ def plot_determinant(vals, gammas=None):
 
 ### Utility functions to read from disk and summarize (AUC mean etc) PifxeFlipping measuremens
 
-import functools
-
-# y_batch = target.detach().numpy()
-# x_batch =   data.detach().numpy().reshape((100, 1, 28, 28))
-
 # Decorate the function with lru_cache
 @functools.lru_cache(maxsize=100)
-def pf_main(baseline, mode='individual', gammas='gammas40', which='test'):
+def pf_main(baseline, mode='individual', gammas='gammas40', which='test', xai_method = 'lrp', intermediate=False):
     print("Rerunning...")
 
-    if which=='test first 100': which=''
-    elif which=='test': which='__testset'
+    if which=='test first 100' and (xai_method != 'lrp' or gammas=='gammas80'): 
+        which='__testset100'
+    elif which=='test first 100': 
+        which=''
+    elif which=='test': 
+        which='__testset'
     else: assert 0
+    
+    if xai_method == 'lrp':
+        method_str = f'{mode}_gamma__{gammas}'
+        
+        if gammas=='gammas40': parameters = gammas40
+        elif gammas=='gamma_0_1_21_inf': parameters = gammas_0_1_21_inf
+        elif gammas=='gammas80': parameters = gammas80
+        else: assert 0, "invalid gammas"
+    elif xai_method == 'ig':
+        method_str = 'ig50'
+        parameters = [1]
+    elif xai_method == 'shap':
+        method_str = 'shap__background_size-100__batch_size-10'
+        parameters = [1]
+    else:
+        assert 0, f"invalid XAI method: {xai_method}"
 
-    key = f'PixFlipScores{which}__{baseline}__{mode}_gamma__{gammas}'
+    key = f'PixFlipScores{which}__{baseline}__{method_str}'
+    if intermediate: key += '__intermediate'
+
     # key = 'PixFlipScores_gamma_0_1_21_inf'
     batch_scores = load_data('d3', key)
     assert batch_scores, f"invalid key: {key}"
     
-    if gammas=='gammas40': gammas = gammas40
-    elif gammas=='gamma_0_1_21_inf': gammas = gammas_0_1_21_inf
-    elif gammas=='gammas80': gammas = gammas80
-    else: assert 0, "invalid gammas"
-
-    print('shape:', np.array(batch_scores['LRP-0']['PixFlip']).shape)
-
     experiment_dict = {}
 
     for mode_str, mode_dict in batch_scores.items():
@@ -834,25 +852,30 @@ def pf_main(baseline, mode='individual', gammas='gammas40', which='test'):
             if 'AUC' in method_str: continue
             auc = batch_auc(method_scores)
             experiment_dict[mode_str][method_str + ' AUC (per sample)'] = auc
-            experiment_dict[mode_str][method_str + ' AUC (batch mean)'] = np.mean(auc)
-            experiment_dict[mode_str][method_str + ' AUC (batch median)'] = np.median(auc)
 
         # experiment_dict[mode_str]['Layerwise Relevancies'] = relevancies_per_mode[mode_str]
-        
-    # experiment_dict['x_batch'] = x_batch
-    # experiment_dict['y_batch'] = y_batch
-
-
+    
     ### prep plotting
+    
+    if xai_method != 'lrp':
+        if xai_method == 'ig':
+            only_parametrisation = experiment_dict['050/050']
+        else:
+            # for now this is only shap.
+            # assumes that there is only one entry in the dict.
+            only_parametrisation = next(iter(experiment_dict.values()))
+        
+        aucs = np.array(only_parametrisation['PixFlip AUC (per sample)'])[None, :, None, None]
+        return experiment_dict, aucs
 
-    k = len(next(iter(experiment_dict.values()))['PixFlip AUC (per sample)'])
-
-    aucs =        np.zeros((len(d3_after_conv_layer), k, len(gammas), 1))
-    auc_means =   np.zeros((len(d3_after_conv_layer), 1, len(gammas), 1))
-    auc_medians = np.zeros((len(d3_after_conv_layer), 1, len(gammas), 1))
+    #### for some reason I made LRP much more compex...
 
     layer_prefixes = {}
     for full_key in experiment_dict.keys():
+            
+        # PLEASE DELETE THIS AGAIN
+        # if 'l>1 ' not in full_key and 'l>3 ' not in full_key and  'l>6 ' not in full_key: continue
+        
         if 'Gamma.' in full_key:
             layer_prefix = full_key.split('gamma=')[0]
             layer_int = int(layer_prefix.split('<')[1])
@@ -860,38 +883,36 @@ def pf_main(baseline, mode='individual', gammas='gammas40', which='test'):
                 layer_prefixes[layer_int] = layer_prefix
 
     layer_prefixes = dict(sorted(layer_prefixes.items())).values() # sort by layer integer, then keep only the strings.
-    print(layer_prefixes)
+    n_matrices = len(layer_prefixes)
+    n_points = len(next(iter(experiment_dict.values()))['PixFlip AUC (per sample)'])
+    aucs = np.zeros((n_matrices, n_points, len(parameters), 1))
 
     for i, lpref in enumerate(layer_prefixes):
         modes_sorted = dict()
-        if 0 in gammas: modes_sorted[0] = 'LRP-0'
+        if 0 in parameters: modes_sorted[0] = 'LRP-0'
         for mode_str in experiment_dict.keys():
             if lpref in mode_str:
                 g = float(mode_str.split('gamma=')[1])
                 modes_sorted[g] = mode_str
 
-        # assert len(modes_sorted) == len(gammas), f"{len(modes_sorted)} != {len(gammas)}"
-        if len(modes_sorted) != len(gammas):
-            print(f"{len(modes_sorted)} != {len(gammas)}")
+        # assert len(modes_sorted) == len(parameters), f"{len(modes_sorted)} != {len(parameters)}"
+        if len(modes_sorted) != len(parameters):
+            print(f"len(modes_sorted) != len(parameters): {len(modes_sorted)} != {len(parameters)}")
 
         modes_sorted = dict(sorted(modes_sorted.items())).values() # sort by gamma float, then keep only the strings.
-        if i==0: print(modes_sorted)
-        
         for j, mode_str in enumerate(modes_sorted):
             aucs       [i, :, j, 0] = experiment_dict[mode_str]['PixFlip AUC (per sample)']
-            auc_means  [i, 0, j, 0] = experiment_dict[mode_str]['PixFlip AUC (batch mean)']
-            auc_medians[i, 0, j, 0] = experiment_dict[mode_str]['PixFlip AUC (batch median)']
 
-    return experiment_dict, aucs, auc_means, auc_medians
+    return experiment_dict, aucs
 
 def pf_auc(baseline, **kwargs):
     return pf_main(baseline, **kwargs)[1]
 
 def pf_auc_mean(baseline, **kwargs):
-    return pf_main(baseline, **kwargs)[2]
+    return np.mean(pf_main(baseline, **kwargs)[1], axis=1, keepdims=True)
 
 def pf_auc_median(baseline, **kwargs):
-    return pf_main(baseline, **kwargs)[3]
+    return np.median(pf_main(baseline, **kwargs)[1], axis=1, keepdims=True)
 
 def pf_auc_quantile(baseline, quantiles, **kwargs):
     if quantiles is int or quantiles is float: quantiles = [quantiles]
@@ -908,6 +929,16 @@ def plot_cond_casc(gammas_str="gammas40", **kwargs):
     kwargs.setdefault('kde_bw', .4)
     kwargs.setdefault('ticks', [1e-4, .01, .25, 1, 4, 32, 512])
     return plot_cond(key='svals__m0_to_1__cascading_gamma__'+gammas_str, **kwargs)
+
+def plot_cond_all(gammas_str="gammas80", gamma_in_fc=False, modifier='', **kwargs):
+    kwargs.setdefault('percentile', (0, 0))
+    # kwargs.setdefault('dice', ((), (40,80)))
+    kwargs.setdefault('xlim', (1e-4, 512))
+    kwargs.setdefault('ylim', (1.4, 5e2))
+    kwargs.setdefault('kde_bw', .4)
+    kwargs.setdefault('ticks', [1e-4, .01, .25, 1, 4, 32, 512])
+    mode = 'all_gamma__' if gamma_in_fc else 'all_conv_gamma__'
+    return plot_cond(key='svals__m0_to_0__testset100__'+mode+gammas_str+modifier, **kwargs)
 
 def plot_cond_ind(gammas_str="gammas40", **kwargs):
     kwargs.setdefault('kde_bw', .4)
@@ -928,7 +959,7 @@ def plot_cond_ind_gamma(gammas_str="gammas40", **kwargs):
     kwargs.setdefault('ticks', [1e-4, .01, .25, 1, 4, 32, 512])
     return plot_cond(key='svals__m0_to_1__individual_gamma__'+gammas_str, **kwargs)
 
-def plot_cond(key, hline=0., **kwargs):
+def plot_cond(key, hline=0., normalized=True, **kwargs):
     kwargs.setdefault('percentile', (0, .05))
     kwargs.setdefault('mode', 'lines')
     kwargs.setdefault('alpha', 1)
@@ -940,21 +971,23 @@ def plot_cond(key, hline=0., **kwargs):
 
     if 'gammas400' in key:
         kwargs.setdefault('xscale', 'linear')
-    if 'gammas400' in key or 'gammas80' in key:
+    if 'gammas400' in key: #  or 'gammas80' in key:
         kwargs.setdefault('yscale', 'linear')
         
+    if not normalized: key += '__unnormalized'
     fig, axs = plot_condition_number(('d3', key), **kwargs)
 
     if der and type(hline) in [float, int]: 
         for ax in axs: ax.axhline(hline)
     return fig, axs
 
-def plot_pf_auc(agg, mode, baselines, fig, axes, norm=False, which='test', dice=(5,),
-        gammas='gammas40', legend="upper left", **kwargs):
+def plot_pf_auc(agg, mode, baselines, fig, axs, norm=False, which='test', dice=(5,),
+        gammas='gammas40', legend="upper left", intermediate=False, **kwargs):
     kwargs.setdefault('sharey', True)
     kwargs.setdefault('plot_kwargs', {'ls':'--', 'lw':2})
     kwargs.setdefault('mark_minima', True)
     kwargs.setdefault('print_minima', False)
+    kwargs.setdefault('show', False)
     ylabel = f"PixelFlipping AUC, {agg} over 8400 test set points"
     tag_line = [f"PF-AUC. (Replace pixels with baseline '{b}')" for b in baselines]
     if agg=='mean':   agg_func = pf_auc_mean
@@ -975,7 +1008,7 @@ def plot_pf_auc(agg, mode, baselines, fig, axes, norm=False, which='test', dice=
     legend=False
     tag_line=None
 
-    auc_agg = np.concatenate([agg_func(baseline, mode=mode, gammas=gammas, which=which) for baseline in baselines], axis=3)
+    auc_agg = np.concatenate([agg_func(baseline, mode=mode, gammas=gammas, which=which, intermediate=intermediate) for baseline in baselines], axis=3)
 
     auto_ylim = None
     if norm:
@@ -989,14 +1022,14 @@ def plot_pf_auc(agg, mode, baselines, fig, axes, norm=False, which='test', dice=
     # kwargs.setdefault('ax_func', lambda ax: ax.tick_params(axis='y', colors=purple, weight='bold'))
     kwargs.setdefault('ax_func', lambda ax: ax.tick_params(axis='y', colors=purple) or [label.set_fontweight('bold') for label in ax.get_yticklabels()])
 
-    print(f"AUC. ylim: {kwargs['ylim']}, sharey {kwargs['sharey']}")
-    plot_vals_lineplot(auc_agg, dice=dice, axes=axes,
+    # print(f"AUC. ylim: {kwargs['ylim']}, sharey {kwargs['sharey']}")
+    plot_vals_lineplot(auc_agg, dice=dice, axes=axs,
                         xscale='log', yscale='linear', tag_line=tag_line,
                             ylabel=ylabel, legend=legend, **kwargs)
     
-    fig.axes[-1].set_ylabel('PixelFlipping AUC', fontsize=SMALL_FS, color=purple)
+    fig.axes[-1].set_ylabel('PixelFlipping AUC (dashed lines & \u2716)', fontsize=SMALL_FS, color=purple, rotation=90)
 
-def prettify_plot(fig, axs, mode_cond=False, mode_pf=False):
+def prettify_plot(fig, axs, mode_cond=False, mode_pf=False, ylim=None, xlim=None):
     fig.tight_layout()
     plt.subplots_adjust(wspace=0.12)
 
@@ -1015,6 +1048,10 @@ def prettify_plot(fig, axs, mode_cond=False, mode_pf=False):
     elif mode_pf=='cascading':        annotate_axs_d3_cascading(axs, pf=True)
     else: 
         assert mode_pf==False, "Invalid mode_pf: " + mode_pf
+        
+    for ax in axs:
+        if ylim is not None: ax.set_ylim(ylim)
+        if xlim is not None: ax.set_xlim(xlim)
 
 
 
@@ -1122,7 +1159,7 @@ def plot_vals_lineplot(vals, gammas=None,
 
     if figsize is None: 
         figsize = (20, 10) if n_ax==(1,1) else (5*n_ax[1], 3*n_ax[0])
-    if axes:         
+    if axes is not None:
         if twinx:
             axs = np.vectorize(lambda ax: ax.twinx())(axes)
         else:
@@ -1130,7 +1167,7 @@ def plot_vals_lineplot(vals, gammas=None,
     else:       
         fig, axs = plt.subplots(*n_ax, figsize=figsize, sharey=sharey)
     axs, ax_i, ax = np.array(axs).T.flatten(), -1, None
-    assert len(axs) == np.prod(n_ax), "passed axs do not match passed data."
+    assert len(axs) == np.prod(n_ax), f"passed axs do not match passed data. {len(axs)}, {n_ax}, {one_plot_per}"
 
     if not axes:
         if title is not None:
@@ -1274,7 +1311,7 @@ def plot_vals_lineplot(vals, gammas=None,
                 if print_minima:
                     print(i, ':', x_mini[0], ',\t# value:', y_mini[0])
                 if mark_minima:
-                    ax.scatter(x=x_mini, y=y_mini, marker='X', s=150, zorder=2)
+                    ax.scatter(x=x_mini, y=y_mini, marker='X', s=150, zorder=5)
 
 
             if mark_positive_slope: # plot a scatter dot if the series values is increasing

@@ -1,6 +1,6 @@
 import numpy as np
 import torch
-from scipy.sparse import coo_array
+from scipy.sparse import coo_array, coo_matrix
 from tqdm import tqdm
 import copy
 
@@ -21,9 +21,10 @@ def layerwise_forward_pass_general(layers, data=None, checks=False, pos_neg=Fals
     L = len(layers)
 
     data = data.reshape(inp_shape) if inp_shape else data[:, :, None, None]
+    data = data.detach()
 
     A = [data]+[None]*L
-    A_pos = [None]*(L+1)
+    A_pos = [data]+[None]*L
     A_neg = [None]*(L+1)
     c_list = []
 
@@ -31,31 +32,34 @@ def layerwise_forward_pass_general(layers, data=None, checks=False, pos_neg=Fals
         lay = layers[l]
         if isinstance(lay, torch.nn.Flatten):
             batch_size, *image_size = A[l].shape
-            A[l+1] = A[l].reshape((batch_size, np.prod(image_size), 1, 1))
+            A[l+1] = A[l].reshape((batch_size, np.prod(image_size), 1, 1)).detach()
+            A_pos[l+1] = A[l+1]
         else:
-            A[l+1] = lay.forward(A[l])
+            A[l+1] = lay.forward(A[l]).detach()
+            A_pos[l+1] = A[l+1]
             
             # calculate positive and negative contributions to neurons seperately
-            if (pos_neg or get_c) and isinstance(lay, torch.nn.Conv2d):
-                with torch.no_grad():
-                    # print(l, lay.weight.shape)
-                    lay_pos, lay_neg = copy.deepcopy(lay), copy.deepcopy(lay)
-                    lay_pos.weight.data = lay.weight.clone().clip(min=0)
-                    lay_pos.bias.data =     lay.bias.clone().clip(min=0)
-                    lay_neg.weight.data = lay.weight.clone().clip(max=0)
-                    lay_neg.bias.data =     lay.bias.clone().clip(max=0)
+            if (pos_neg or get_c):
+                if isinstance(lay, torch.nn.Conv2d):
+                    with torch.no_grad():
+                        # print(l, lay.weight.shape)
+                        lay_pos, lay_neg = copy.deepcopy(lay), copy.deepcopy(lay)
+                        lay_pos.weight.data = lay.weight.clone().clip(min=0)
+                        lay_pos.bias.data =     lay.bias.clone().clip(min=0)
+                        lay_neg.weight.data = lay.weight.clone().clip(max=0)
+                        lay_neg.bias.data =     lay.bias.clone().clip(max=0)
 
-                    a_pos = lay_pos.forward(A[l])
-                    a_neg = lay_neg.forward(A[l])
-                    A_pos[l+1] = a_pos
-                    A_neg[l+1] = a_neg
+                        a_pos = lay_pos.forward(A[l])
+                        a_neg = lay_neg.forward(A[l])
+                        A_pos[l+1] = a_pos
+                        A_neg[l+1] = a_neg
 
-                    assert a_pos.ndim==4, a_pos.shape
-                    c = -a_neg / a_pos
-                    c[-a_neg >= a_pos] = -np.inf # only include activated neurons
-                    c = c.view((len(a_pos), -1)).max(axis=1).values
+                        assert a_pos.ndim==4, a_pos.shape
+                        c = -a_neg / a_pos
+                        c[-a_neg >= a_pos] = -np.inf # only include activated neurons
+                        c = c.view((len(a_pos), -1)).max(axis=1).values
 
-                    if get_c: c_list.append(c)
+                        if get_c: c_list.append(c)
 
     # if checks:
     #     res = model.forward(A[0]).flatten().detach()
@@ -109,6 +113,8 @@ def compute_relevancies(mode, layers, A, output_rels='correct class', target=Non
     if return_only_l is not None:
         assert 0 <= return_only_l < l_out, f"Invalid return_only_l: {return_only_l}. l_out is {l_out}."
 
+    l_ub = float(mode.split("l<")[1].split(" ")[0]) if "l<" in mode else 1000
+    l_lb = float(mode.split("l>")[1].split(" ")[0]) if "l>" in mode else -1000
 
     if output_rels == 'correct class':
         assert target is not None
@@ -124,6 +130,9 @@ def compute_relevancies(mode, layers, A, output_rels='correct class', target=Non
 
     R = [None]*(L+1)
     R[l_out] = output_rels
+    
+    # summed = R[l_out].flatten(start_dim=1).sum(axis=1)
+    # print(torch.quantile(summed, torch.tensor([.01, .05, .1, .25, .5, .75, .95, .99, 1])))
 
     for l in range(1, l_out)[::-1]:
         A[l] = (A[l].data).requires_grad_(True)
@@ -136,19 +145,18 @@ def compute_relevancies(mode, layers, A, output_rels='correct class', target=Non
             helper_layer = tut_utils.newlayer(layers[l], rho)
 
             if isinstance(layers[l],torch.nn.Conv2d):
-                if 'Gamma' in mode:
-                    l_ub = float(mode.split("l<")[1].split(" ")[0]) if "l<" in mode else 1000
-                    l_lb = float(mode.split("l>")[1].split(" ")[0]) if "l>" in mode else -1000
-                    if l_lb < l < l_ub:
-                        curr_gamma = float(gam) if 'inf' != (gam := mode.split("gamma=")[1].split(" ")[0]) else 1e8
-                        if 'print' in mode: print('g', end="")
-                        
-                        if 'Gamma.' in mode:
-                            rho = lambda p: p + curr_gamma*p.clamp(min=0)
-                            helper_layer = tut_utils.newlayer(layers[l], rho)
-                        elif 'Gamma mat.' in mode:
-                            helper_layer = copy.deepcopy(layers_conv_as_mat[l]) # todo: in the notebook I used a precomputation "layers_conv_as_mat"
-                            helper_layer.set_gamma(curr_gamma)
+                if 'Gamma' in mode and l_lb < l < l_ub:
+                    curr_gamma = float(gam) if 'inf' != (gam := mode.split("gamma=")[1].split(" ")[0]) else 1e8
+                    if 'print' in mode: print('g', end="")
+                    
+                    # print('gamma')
+                    
+                    if 'Gamma.' in mode:
+                        rho = lambda p: p + curr_gamma*p.clamp(min=0)
+                        helper_layer = tut_utils.newlayer(layers[l], rho)
+                    elif 'Gamma mat.' in mode:
+                        helper_layer = copy.deepcopy(layers_conv_as_mat[l]) # todo: in the notebook I used a precomputation "layers_conv_as_mat"
+                        helper_layer.set_gamma(curr_gamma)
 
             incr = lambda z: z + eps
             z = incr(helper_layer.forward(A[l]))                            # step 1
@@ -166,6 +174,9 @@ def compute_relevancies(mode, layers, A, output_rels='correct class', target=Non
             R[l] = R[l+1]
 
         if 'print' in mode: print('\t', l, layers[l])
+        
+        # summed = R[l].flatten(start_dim=1).sum(axis=1)
+        # print(torch.quantile(summed, torch.tensor([.01, .05, .1, .25, .5, .75, .95, .99, 1])))
         
         if return_only_l == l:
             return R[l]
@@ -198,7 +209,7 @@ def compute_relevancies(mode, layers, A, output_rels='correct class', target=Non
 
 
 # compute global LRP transition matrix
-def LRP_global_mat(model, point, gamma, l_lb = -1000, l_ub = 1000, delete_unactivated_subnetwork = 'mask', l_inp=0, l_out=-1, eps=1e-9):    
+def LRP_global_mat(model, point, gamma, l_lb = -1000, l_ub = 1000, delete_unactivated_subnetwork = 'mask', l_inp=0, l_out=-1, eps=1e-9, normalized=False):    
     
     if point.ndim == 3: point = point.flatten()
     assert point.ndim == 1, f"Dont pass batch. 'point' should have 1 dim but shape is {point.shape}"
@@ -211,6 +222,12 @@ def LRP_global_mat(model, point, gamma, l_lb = -1000, l_ub = 1000, delete_unacti
     dimensionality = A_shapes[l_out]
     num_basis_vectors = np.prod(dimensionality)
     basis_vectors = torch.eye(num_basis_vectors).reshape(num_basis_vectors, *dimensionality)
+    
+    if not normalized:
+        # instead of passing basis vectors through the network, pass the class activations. 
+        # This overweights such rows of the conditional relevance matrix where the prior relevance is high. it's a "joint relevance" of the backward pass.
+        assert l_out==-1, 'Never checked functionality of not normalized, with non output layers. Check if Flatten works correctly.'
+        basis_vectors = torch.einsum('i...,i->i...', basis_vectors, A[l_out].detach().flatten())
 
     if delete_unactivated_subnetwork == True:
         # don't calculate the basis vector projections for those output elemnts/neurons that are not activated.
@@ -253,12 +270,12 @@ def calc_mats_batch_functional(mat_funcs, gammas, points, tqdm_for='matrix', pic
         pickle_key = (pickle_key[0], pickle_key[1].replace('svals', 'LRP'))
         
         if not overwrite:
-            mats = load_data(*pickle_key)
+            mats = load_data(*pickle_key, warn=False)
             if mats is not False: 
                 print("Found unpartitioned, full result. Returning.")
                 return mats
             
-            mats = load_data(*pickle_key, partition=partition)
+            mats = load_data(*pickle_key, partition=partition, warn=False)
             if mats is not False: 
                 print("Found partitioned result. Returning.")
                 return mats
@@ -298,3 +315,52 @@ def funcs_cascading__s4__m1_to_1(model, delete=True): # m1 to 1
     return [partial(LRP_global_mat, model=model, l_inp=1, l_out=-3, l_ub=l_ub, delete_unactivated_subnetwork=delete) for l_ub in s4_after_conv_layer]
 def funcs_inv_cascading__s4__m1_to_1(model, delete=True): # m1 to 1
     return [partial(LRP_global_mat, model=model, l_inp=1, l_out=-3, l_lb=l_ub-2, delete_unactivated_subnetwork=delete) for l_ub in s4_after_conv_layer[::-1]]
+
+
+
+def transform_xai_mat(mat, act, cutoff=0, first_n=None, first_p=None, first_p_pos=None):
+    act = act.flatten().detach()
+    
+    
+    assert (not not cutoff) + (not not first_n) + (not not first_p) + (not not first_p_pos) == 1, f"Pass only one of cutoff, first_n, first_p, first_p_pos. {cutoff} {first_n} {first_p} {first_p_pos}"
+    if first_n:
+        if not (0 < first_n < len(act)):
+            raise ValueError(f"n must be between 0 and the size of the array, {first_n} !! {len(act)}")
+        cutoff = np.partition(act, -first_n)[-first_n]
+        if cutoff==0: print(f'Warn: {first_n}-th largest is a 0 activation.')
+    elif first_p:
+        assert 0 < first_p <= 100
+        cutoff = np.percentile(act, 100-first_p)
+        if cutoff==0: print(f'Warn: Percentile {first_p} is a 0 activation.')
+    elif first_p_pos:
+        assert 0 < first_p_pos <= 100
+        act_pos = act[act>0]
+        cutoff = np.percentile(act_pos, 100-first_p_pos)
+        # print(cutoff)
+        if cutoff==0: print(f'Warn: Percentile {first_p} is a 0 activation.')
+        
+    # print(act.shape, cutoff)
+        
+    mask = act>=cutoff
+    
+    # if len(mask) != mat.shape[1]:
+    #     mask = mask[act>0]
+    assert len(mask) == mat.shape[1], 'mat does not match passed activations (or the subset of positive activations).'
+    
+    # print(mask.shape, mask.mean(dtype=float))
+    
+    if type(mat) in (coo_array, coo_matrix):
+        m = mat.toarray()
+        m = m[:, mask]
+        return coo_array(m)
+    else:
+        return mat[:, mask]
+    
+def batch_transform_xai_mat(mats, A, **kwargs):
+    new_mats = \
+        [[[transform_xai_mat(per_g.copy(), a, **kwargs)
+            for per_g in per_p]
+                for per_p, a in zip(per_w, A)]
+                    for per_w in mats]
+    # new_mats = np.array(new_mats)
+    return new_mats

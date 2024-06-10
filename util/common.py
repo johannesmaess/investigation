@@ -14,7 +14,13 @@ class HiddenPrints:
         sys.stdout = self._original_stdout
         sys.stderr = self._original_stderr
         
-      
+### check column sum of all sparse arrays within a multidimensional np array
+def vectorize(arr, func=lambda x: x.sum(axis=0)):
+    # Assuming arr is an array of sparse arrays
+    result = np.array([func(x) for x in arr.flatten()])
+    shape = list(arr.shape) + [-1]
+    result = result.reshape(shape)
+    return result
     
 ### convenience function to get the right gamma array, based on svals shape
         
@@ -28,8 +34,8 @@ def match_gammas(vals):
     if num==80: return gammas80
     if num==400: return gammas400
 
-    print("Provide gammas manually, if they are not any of {gammas3, gammas5, gammas_0_1_21_inf, gammas40, gammas80}.")
-    assert 0
+    raise Exception("Provide gammas manually, if they are not any of {gammas3, gammas5, gammas_0_1_21_inf, gammas40, gammas80}.")
+
     
 def parse_partition(n_weights, n_points, partition):
     """
@@ -124,8 +130,7 @@ def annotate_axs_d3_individual_gamma(axs, pf=False, left=False, **kwargs):
 def annotate_axs_all(axs, **kwargs):
     axs = annotate_common(axs, n_expected=1, **kwargs)
 
-    axs[0].set_title("$R^{(1 \\leftarrow T)}_{\cdot | \cdot}$", loc='left',  fontsize=LARGE_FS)
-    axs[0].set_title("$\gamma^{(1-T)} = \gamma$",               loc='right', fontsize=LARGE_FS)
+    axs[0].set_title("$A^{(0 \\leftarrow T)}_{LRP}$, $\gamma^{(0-T)} = \gamma$", loc='left',  fontsize=SMALL_FS)
     
 def annotate_axs_individual(axs, ts=None, **kwargs):
     axs = annotate_common(axs, **kwargs)
@@ -136,7 +141,7 @@ def annotate_axs_individual(axs, ts=None, **kwargs):
         assert len(ts) == len(axs)
 
     def annotate_one(ax, t):
-        title="$R^{(" + str(t) + " \\leftarrow " + str(t+1) + ")}_{\cdot | \cdot}(\gamma)$"
+        title="$A^{(" + str(t) + " \\leftarrow " + str(t+1) + ")}_{LRP}(\gamma)$"
         ax.set_title(title, loc='left', fontsize=SMALL_FS)
 
     for ax, t in zip(axs, ts):

@@ -195,11 +195,12 @@ def data_loaders(shuffle = True, batch_size = 100, shapley_values_for=None, poin
     Only the test_loader, additionally equiped with the shapeley values for the choosen model will be returned.
     """
     # Prepare Dataset
+    # download data from: https://www.kaggle.com/competitions/digit-recognizer/data
     # load data
     try:
         train = pd.read_csv(r"./dataset/kaggle_input/train.csv",dtype = np.float32)
     except:
-        train = pd.read_csv(r"/Users/jmaess/Repositories/Masterarbeit/dataset/kaggle_input/train.csv",dtype = np.float32)
+        train = pd.read_csv(r"/Users/johannes/Repositories/xai-operator-analysis/dataset/kaggle_input/train.csv",dtype = np.float32)
 
     # split data into features(pixels) and labels(numbers from 0 to 9)
     targets_numpy = train.label.values

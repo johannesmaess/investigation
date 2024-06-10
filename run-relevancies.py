@@ -14,13 +14,15 @@ model_d3 = model_dict['cb1-8-8-8_cb2-16-16-16_seed-0']
 
 ### RUN ###
 
-# gamma_mode = 'cascading_gamma'
-gamma_mode = 'individual_gamma'
+gamma_mode = 'cascading_gamma'
+# gamma_mode = 'individual_gamma'
 
 # gammas = gammas_0_1_21_inf
-gammas = gammas40
+# gammas = gammas40
+gammas = gammas80
 
 if   gammas is gammas40:          g_str = 'gammas40'
+if   gammas is gammas80:          g_str = 'gammas80'
 elif gammas is gammas_0_1_21_inf: g_str = 'gammas_0_1_21_inf'
 else: assert 0
 
@@ -33,7 +35,7 @@ for i, l_ub in enumerate(d3_after_conv_layer):
             if gamma_mode=='cascading_gamma':  modes[i*1000+j] = f'Gamma.            l<{l_ub} gamma={g}'
             if gamma_mode=='individual_gamma': modes[i*1000+j] = f'Gamma. l>{l_ub-2} l<{l_ub} gamma={g}'
 
-data, target = first_mnist_batch(batch_size=20) # num points = all
+data, target = first_mnist_batch(batch_size=100)
 
 A, layers = layerwise_forward_pass(model_d3, data)
 L = len(layers)
@@ -47,7 +49,7 @@ if __name__ == '__main__':
     with Manager() as manager:
         shared_dict = manager.dict()
 
-        num_processes = 6  # Set the desired number of parallel threads
+        num_processes = 20  # Set the desired number of parallel threads
         pool = Pool(processes=num_processes)
 
         args = [(mode, shared_dict) for mode in list(modes.values())]

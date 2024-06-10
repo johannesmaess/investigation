@@ -56,7 +56,7 @@ def toconv(layers):
 # Visualizing data
 # --------------------------------------
 
-def heatmap(R,sx=2,sy=2, colorbar=False):
+def heatmap(R,sx=2,sy=2, colorbar=False, ax=None):
 
     b = 10*((np.abs(R)**3.0).mean()**(1.0/3))
 
@@ -64,14 +64,17 @@ def heatmap(R,sx=2,sy=2, colorbar=False):
     my_cmap = plt.cm.seismic(np.arange(plt.cm.seismic.N))
     my_cmap[:,0:3] *= 0.85
     my_cmap = ListedColormap(my_cmap)
-    plt.figure(figsize=(sx,sy))
-    plt.subplots_adjust(left=0,right=1,bottom=0,top=1)
-    plt.axis('off')
-    ret = plt.imshow(R,cmap=my_cmap,vmin=-b,vmax=b,interpolation='nearest')
-    if colorbar: plt.colorbar(ret)
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(sx,sy))
+        plt.subplots_adjust(left=0,right=1,bottom=0,top=1)
+        plt.axis('off')
+    ret = ax.imshow(R,cmap=my_cmap,vmin=-b,vmax=b,interpolation='nearest')
+    if colorbar: ax.colorbar(ret)
     # plt.show()
+    
+    return ax
 
-def heatmap_batch(R_batch,sx,sy):
+def heatmap_batch(R_batch,sx,sy, normalize_across_batch=False):
 
     from matplotlib.colors import ListedColormap
     my_cmap = plt.cm.seismic(np.arange(plt.cm.seismic.N))
@@ -80,12 +83,13 @@ def heatmap_batch(R_batch,sx,sy):
 
     fig, axs = plt.subplots(1, len(R_batch), figsize=(sx * len(R_batch),sy))
     plt.subplots_adjust(left=0,right=1,bottom=0,top=1)
+    b = 10*((np.abs(R_batch)**3.0).mean()**(1.0/3))
     for R, ax in zip(R_batch, axs):
         ax.axis('off')
         if np.isnan(R).sum(): 
             print(np.isnan(R).mean(dtype=float))
             continue
-        b = 10*((np.abs(R)**3.0).mean()**(1.0/3))
+        if not normalize_across_batch: b = 10*((np.abs(R)**3.0).mean()**(1.0/3))
         ax.imshow(R,cmap=my_cmap,vmin=-b,vmax=b,interpolation='nearest')
     plt.show()
 
